@@ -22,37 +22,37 @@ To run the game, you need the following dependencies:
 
 ## Controls (can change anytime)
 ### Player 1:
-- Up: Up
-- Down: Down
-- Left: Left
-- Right: Right
-- Run: Z
-- Jump: X
-- Pause: Enter
+- **Up:** Up
+- **Down:** Down
+- **Left:** Left
+- **Right:** Right
+- **Run:** Z
+- **Jump:** X
+- **Pause:** Enter
 
 ### Player 2:
-- Up: W
-- Down: S
-- Left: A
-- Right: D
-- Run: C
-- Jump: V
-- Pause: P
+- **Up:** W
+- **Down:** S
+- **Left:** A
+- **Right:** D
+- **Run:** C
+- **Jump:** V
+- **Pause:** P
 
 ### Player 3:
-- Up: I
-- Down: J
-- Left: K
-- Right: L
-- Run: M
-- Jump: N
-- Pause: O
+- **Up:** I
+- **Down:** J
+- **Left:** K
+- **Right:** L
+- **Run:** M
+- **Jump:** N
+- **Pause:** O
 
 ### Player 4:
-- Up: 8 (keypad)
-- Down: 5 (keypad)
-- Left: 4 (keypad)
-- Right: 6 (keypad)
-- Run: B
-- Jump: Q
-- Pause: 0 (keypad)
+- **Up:** 8 (keypad)
+- **Down:** 5 (keypad)
+- **Left:** 4 (keypad)
+- **Right:** 6 (keypad)
+- **Run:** B
+- **Jump:** Q
+- **Pause:** 0 (keypad)
