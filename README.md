@@ -19,3 +19,40 @@ This is a Python-based recreation of the classic **Super Mario Bros.** game. The
 To run the game, you need the following dependencies:
 - Python 3.x
 - Pygame library
+
+## Controls (can change anytime)
+### Player 1:
+- Up: Up
+- Down: Down
+- Left: Left
+- Right: Right
+- Run: Z
+- Jump: X
+- Pause: Enter
+
+### Player 2:
+- Up: w
+- Down: s
+- Left: a
+- Right: d
+- Run: c
+- Jump: v
+- Pause: p
+
+### Player 3:
+- Up: i
+- Down: j
+- Left: k
+- Right: l
+- Run: m
+- Jump: n
+- Pause: o
+
+### Player 4:
+- Up: 8 (keypad)
+- Down: 5 (keypad)
+- Left: 4 (keypad)
+- Right: 6 (keypad)
+- Run: b
+- Jump: q
+- Pause: 0 (keypad)
