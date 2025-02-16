@@ -622,7 +622,7 @@ while running:
                     "controls4": controls4,
                     "deadzone": deadzone,
                     "fullscreen": fullscreen
-                }, settings)
+                }, settings, indent=4)
         
         controls_table = [controls, controls2, controls3, controls4]
         
