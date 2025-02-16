@@ -315,6 +315,13 @@ class Player:
         self.jump_lock = False
         self.update_hitbox()
         self.rect.y -= self.rect.height
+        self.controls_table = {
+            "mario": controls,
+            "luigi": controls2,
+            "yellowtoad": controls3,
+            "bluetoad": controls4
+        }
+        self.controls = self.controls_table[character]
 
     def update_hitbox(self):
         prev_bottom = self.rect.bottom
@@ -326,11 +333,11 @@ class Player:
 
     def update(self, ground):
         if self.controls_enabled:
-            self.left = controls["left"]
-            self.right = controls["right"]
-            self.crouch = controls["down"] if self.on_ground else self.crouch
-            self.run = controls["run"]
-            self.jump = controls["jump"]
+            self.left = self.controls["left"]
+            self.right = self.controls["right"]
+            self.crouch = self.controls["down"] if self.on_ground else self.crouch
+            self.run = self.controls["run"]
+            self.jump = self.controls["jump"]
             self.speed = RUN_SPEED if self.run else WALK_SPEED
 
         self.update_hitbox()
