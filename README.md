@@ -31,28 +31,28 @@ To run the game, you need the following dependencies:
 - Pause: Enter
 
 ### Player 2:
-- Up: w
-- Down: s
-- Left: a
-- Right: d
-- Run: c
-- Jump: v
-- Pause: p
+- Up: W
+- Down: S
+- Left: A
+- Right: D
+- Run: C
+- Jump: V
+- Pause: P
 
 ### Player 3:
-- Up: i
-- Down: j
-- Left: k
-- Right: l
-- Run: m
-- Jump: n
-- Pause: o
+- Up: I
+- Down: J
+- Left: K
+- Right: L
+- Run: M
+- Jump: N
+- Pause: O
 
 ### Player 4:
 - Up: 8 (keypad)
 - Down: 5 (keypad)
 - Left: 4 (keypad)
 - Right: 6 (keypad)
-- Run: b
-- Jump: q
+- Run: B
+- Jump: Q
 - Pause: 0 (keypad)
