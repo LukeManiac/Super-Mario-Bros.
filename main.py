@@ -337,7 +337,6 @@ class Player:
         self.rect.bottom = prev_bottom
 
     def update(self, ground):
-        keys = pygame.key.get_pressed()
         if self.controls_enabled:
             self.left = keys[self.controls["left"]]
             self.right = keys[self.controls["right"]]
@@ -508,7 +507,7 @@ intro_players = [Player(
     character=character,
     controls_enabled=False,
     speedx=1.25,
-    walk_cutscene=True
+    walk_cutscene=True,
     **properties)
     for i, (character, properties) in enumerate(
         [
