@@ -1,7 +1,7 @@
 # Super Mario Bros. for Python
 
 ## Overview
-This is a Python-based recreation of the classic **Super Mario Bros.** game. The game utilizes the `pygame` library for rendering, input handling, and audio management. The purpose of this project is to demonstrate an implementation of a simple platformer game, along with customizable control schemes, sound settings, and player options.
+This is a Python-based recreation of the classic **Super Mario Bros.** game by LukeManiac, **me**. The game utilizes the `pygame` library for rendering, input handling, and audio management. The purpose of this project is to demonstrate an implementation of a simple platformer game, along with customizable control schemes, sound settings, and player options.
 
 ## Features
 - **Menu System**: Interactive menu system with customizable options.
