@@ -1,5 +1,5 @@
 import pygame, json
-from os.path import dirname, abspath, exists
+from os.path import dirname, abspath, exists, getsize
 from math import pi
 
 pygame.init()
@@ -91,8 +91,7 @@ JUMP_HOLD_TIME = 10
 MIN_SPEEDX = pi / 10
 MIN_RUN_TIMER = 0
 MAX_RUN_TIMER = 75
-FPS = 60
-FADE_DURATION = FPS
+FPS = 100
 
 class SFXPlayer:
     def __init__(self):
@@ -198,16 +197,16 @@ class Logo:
         self.spritesheet = load_sprite("logo")
 
     def update(self):
-        self.timer = min(self.timer + 1, self.bounce_time * FPS)
+        self.timer = min(self.timer + 1, self.bounce_time * 60)
         canbounce = self.y < 64
-        if self.timer < self.bounce_time * FPS:
+        if self.timer < self.bounce_time * 60:
             self.y += self.speedy
             self.speedy += 0.25
         if self.y > 64 and canbounce and self.speedy != 0 and self.timer > 0:
             sound_player.play_sound(bump_sound)
             self.speedy /= -1.5
             self.y -= 0.25
-        if self.timer == self.bounce_time * FPS and self.y > 64:
+        if self.timer == self.bounce_time * 60 and self.y > 64:
             sound_player.play_sound(bump_sound)
             self.speedy = 0
             self.y = 64
@@ -216,8 +215,8 @@ class Logo:
         screen.blit(self.spritesheet, (self.x, self.y))
 
 class TitleGround:
-    def __init__(self, y):
-        self.y = y
+    def __init__(self):
+        self.y = SCREEN_HEIGHT - 8
         self.sprite = load_sprite("groundtile")
 
     def check_collision(self, mario):
@@ -284,7 +283,7 @@ class PowerMeter:
             screen.blit(sprite, (draw_x, draw_y))
         
 class Player:
-    def __init__(self, x, y, character="mario", acceleration=0.1, max_jump=4, controls_enabled=True, speedx=0):
+    def __init__(self, x, y, walk_frames=6, run_frames=3, character="mario", acceleration=0.1, max_jump=4, controls_enabled=True, speedx=0, walk_cutscene=False):
         self.spritesheet = load_sprite(character)
         self.controls_enabled = controls_enabled
         self.character = character
@@ -301,6 +300,8 @@ class Player:
         self.down = False
         self.crouch = False
         self.jump = False
+        self.walk_frames = walk_frames
+        self.run_frames = run_frames
         self.color = {
             "mario": (247, 57, 16),
             "luigi": (33, 173, 16),
@@ -311,6 +312,7 @@ class Player:
         self.size = 1
         self.acceleration = acceleration
         self.max_jump = max_jump
+        self.walk_cutscene = walk_cutscene
         self.skidding = False
         self.gravity = 0.25
         self.min_jump = 1
@@ -335,17 +337,18 @@ class Player:
         self.rect.bottom = prev_bottom
 
     def update(self, ground):
+        keys = pygame.key.get_pressed()
         if self.controls_enabled:
-            self.left = self.controls["left"]
-            self.right = self.controls["right"]
-            self.crouch = self.controls["down"] if self.on_ground else self.crouch
-            self.run = self.controls["run"]
-            self.jump = self.controls["jump"]
-            self.speed = RUN_SPEED if self.run else WALK_SPEED
+            self.left = keys[self.controls["left"]]
+            self.right = keys[self.controls["right"]]
+            self.run = keys[self.controls["run"]]
+            self.jump = keys[self.controls["jump"]]
+            self.crouch = keys[self.controls["down"]] if self.on_ground else self.crouch
 
         self.update_hitbox()
+        self.speed = RUN_SPEED if self.run else WALK_SPEED
 
-        if self.on_ground and self.controls_enabled and not self.crouch:
+        if self.on_ground and nor(self.crouch, self.walk_cutscene):
             if self.left and not self.right:
                 self.speedx = max(self.speedx - self.acceleration, -self.speed)
                 self.facing_right = False if self.on_ground else self.facing_right
@@ -415,31 +418,30 @@ class Player:
         if self.crouch:
             self.anim_state = 3 if self.speedy > 0 else 2
         elif self.skidding:
-            self.anim_state = 10
+            self.anim_state = 4 + self.walk_frames
         elif self.speedy < 0:
-            self.anim_state = 16 if self.pspeed else 11
+            self.anim_state = (7 + self.run_frames if self.pspeed else 5) + self.walk_frames
         elif self.speedy >= 0 and nor(self.on_ground, self.crouch):
-            self.anim_state = 17 if self.pspeed else 12
+            self.anim_state = (8 + self.run_frames if self.pspeed else 6) + self.walk_frames
         elif self.speedx == 0 and self.on_ground and not self.crouch:
             self.anim_state = 1
             self.speedx = 0
         elif abs(self.speedx) > 0 and self.on_ground and not self.pspeed:
             self.frame_timer += abs(self.speedx) / 1.25
-            self.anim_state = 4 + int(self.frame_timer // 6) % 6
+            self.anim_state = 4 + int(self.frame_timer // 6) % self.walk_frames
         elif self.pspeed and self.on_ground:
             self.frame_timer += abs(self.speedx) / 1.25
-            self.anim_state = 13 + int(self.frame_timer // 6) % 3
+            self.anim_state = 7 + self.walk_frames + int(self.frame_timer // 6) % self.run_frames
 
     def draw(self):
         sprite = self.spritesheet.subsurface(self.sprites[self.size][self.anim_state - 1])
         sprite = pygame.transform.flip(sprite, not self.facing_right, False)
         draw_x = self.rect.x - camera.x + (((1 if self.character == "mario" else 2 if self.character == "luigi" else 0) if self.anim_state == 16 or self.anim_state == 17 else 0) * (1 if not self.facing_right else -1))
-        draw_y = self.rect.y - camera.y + self.rect.height - 32
+        draw_y = self.rect.y - camera.y + self.rect.height - 33
         screen.blit(sprite, (draw_x, draw_y))
 
 mus_vol = 1
 snd_vol = 1
-vsync = False
 controls = {
     "up": pygame.K_UP,
     "down": pygame.K_DOWN,
@@ -479,12 +481,11 @@ controls4 = {
 fullscreen = False
 deadzone = 0.5
 
-if exists(f"{main_directory}/settings.json"):
+if exists(f"{main_directory}/settings.json") and not getsize(f"{main_directory}/settings.json") == 0:
     with open(f"{main_directory}/settings.json", "r") as file:
         data = json.load(file)
         mus_vol = data.get("mus_vol", mus_vol)
         snd_vol = data.get("snd_vol", snd_vol)
-        vsync = data.get("vsync", vsync)
         controls = data.get("controls", controls)
         controls2 = data.get("controls2", controls2)
         controls3 = data.get("controls3", controls3)
@@ -501,11 +502,42 @@ clock = pygame.time.Clock()
 pygame.display.set_icon(load_sprite("icon"))
 pygame.display.set_caption(f"Super Mario Bros. for Python (FPS: {round(clock.get_fps())})")
 player_dist = 20
-intro_players = [Player(x=centerx - player_dist / 2 + player_dist * i, y=SCREEN_HEIGHT, character=c, controls_enabled=False, speedx=1.25, **a) for i, (c, a) in enumerate([("mario", {}), ("luigi", {"acceleration": 0.05, "max_jump": 5}), ("yellowtoad", {"acceleration": 0.2}), ("bluetoad", {"acceleration": 0.25})])]
+intro_players = [Player(
+    x=centerx - player_dist / 2 + player_dist * i,
+    y=SCREEN_HEIGHT,
+    character=character,
+    controls_enabled=False,
+    speedx=1.25,
+    walk_cutscene=True
+    **properties)
+    for i, (character, properties) in enumerate(
+        [
+            ("mario", {}),
+            (
+                "luigi", {
+                    "acceleration": 0.05,
+                    "max_jump": 5
+                }
+            ),
+            (
+                "yellowtoad", {
+                    "acceleration": 0.2,
+                    "walk_frames": 3
+                }
+            ),
+            (
+                "bluetoad", {
+                    "acceleration": 0.25,
+                    "walk_frames": 3
+                }
+            )
+        ]
+    )
+]
 camera = Camera()
 bgm_player = BGMPlayer()
 sound_player = SFXPlayer()
-title_ground = TitleGround(SCREEN_HEIGHT)
+title_ground = TitleGround()
 background_manager = Background()
 beep_sound = load_sound("beep")
 bump_sound = load_sound("bump")
@@ -546,6 +578,7 @@ if pygame.joystick.get_count() > 0:
 while running:
     bgm_player.set_volume(mus_vol)
     sound_player.set_volume(snd_vol)
+    SCREEN_WIDTH, SCREEN_HEIGHT = pygame.display.get_surface().get_size()
     pygame.display.set_caption(f"Super Mario Bros. for Python (FPS: {round(clock.get_fps())})")
     screen.fill((0, 0, 0))
     keys = pygame.key.get_pressed()
@@ -564,20 +597,19 @@ while running:
 
     if fade_in:
         fade_out = False
-        a += 255 / FADE_DURATION
+        a += 255 / FPS
         if a >= 255:
             a = 255
             fade_in = False
 
     elif fade_out:
         fade_in = False
-        a -= 255 / FADE_DURATION
+        a -= 255 / FPS
         if a <= 0:
             a = 0
             fade_out = False
 
     if menu:
-        vsync_text = "on" if vsync else "off"
         title_screen = [
             [
                 ["1 player game", centery],
@@ -587,13 +619,12 @@ while running:
                 ["options", centery * 1.5]
             ],
             [
-                ["controls (p1)", centery * 0.9],
-                ["controls (p2)", centery],
-                ["controls (p3)", centery * 1.1],
-                ["controls (p4)", centery * 1.2],
-                ["music volume:", centery * 1.3, mus_vol],
-                ["sound volume:", centery * 1.4, snd_vol],
-                ["vsync:", centery * 1.5, vsync_text],
+                ["controls (p1)", centery],
+                ["controls (p2)", centery * 1.1],
+                ["controls (p3)", centery * 1.2],
+                ["controls (p4)", centery * 1.3],
+                ["music volume:", centery * 1.4, mus_vol],
+                ["sound volume:", centery * 1.5, snd_vol],
                 ["joystick deadzone:", centery * 1.6, deadzone],
                 ["back", centery * 1.75]
             ],
@@ -646,140 +677,14 @@ while running:
         menu_options = title_screen[menu_area - 1]
         selected_menu_index = range_number(selected_menu_index, 0, len(menu_options) - 1)
         old_selected_menu_index = selected_menu_index
-
-        with open(f"{main_directory}/settings.json", "w") as settings:
-            json.dump(
-                {
-                    "mus_vol": mus_vol,
-                    "snd_vol": snd_vol,
-                    "vsync": vsync,
-                    "controls": controls,
-                    "controls2": controls2,
-                    "controls3": controls3,
-                    "controls4": controls4,
-                    "deadzone": deadzone,
-                    "fullscreen": fullscreen
-                }, settings, indent=4)
-        
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_RETURN and event.mod & pygame.KMOD_ALT:
-                    fullscreen = not fullscreen
-                    pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.RESIZABLE | (pygame.FULLSCREEN if fullscreen else 0))
-                if nor(title, fade_in, fade_out):
-                    if binding_key:
-                        if event.key == pygame.K_ESCAPE:
-                            sound_player.play_sound(pipe_sound)
-                        else:
-                            sound_player.play_sound(powerup_sound)
-                            controls_table[menu_area - 3][bind_table[selected_menu_index]] = event.key
-                        binding_key = False
-                        current_bind = False
-                        sound_player.stop_sound(sprout_sound)
-                    else:
-                        if event.key == controls["down"]:
-                            selected_menu_index += 1
-                        elif event.key == controls["up"]:
-                            selected_menu_index -= 1
-                    if event.key == controls["left"]:
-                        if menu_options == title_screen[1]:
-                            if selected_menu_index == 4:
-                                mus_vol -= 0.1
-                            elif selected_menu_index == 5:
-                                snd_vol -= 0.1
-                            elif selected_menu_index == 7:
-                                deadzone -= 0.1
-                    elif event.key == controls["right"]:
-                        if menu_options == title_screen[1]:
-                            if selected_menu_index == 4:
-                                mus_vol += 0.1
-                            elif selected_menu_index == 5:
-                                snd_vol += 0.1
-                            elif selected_menu_index == 7:
-                                deadzone += 0.1
-                    elif event.key == controls["run"] and not binding_key:
-                        if menu_options == title_screen[1]:
-                            selected_menu_index = 0
-                            old_selected_menu_index = 0
-                            menu_area = 1
-                            sound_player.play_sound(pipe_sound)
-                        elif menu_options == title_screen[2]:
-                            selected_menu_index = 0
-                            old_selected_menu_index = 0
-                            menu_area = 2
-                            sound_player.play_sound(pipe_sound)
-                    elif event.key == controls["jump"]:
-                        if menu_options == title_screen[0]:
-                            if selected_menu_index == 4:
-                                selected_menu_index = 0
-                                old_selected_menu_index = 0
-                                menu_area = 2
-                                sound_player.play_sound(coin_sound)
-                            else:
-                                fade_in = True
-                                game_ready = True
-                                bgm_player.stop_music()
-                                sound_player.play_sound(coin_sound)
-                                player_count = selected_menu_index + 1
-                        elif menu_options == title_screen[1]:
-                            if selected_menu_index >= 0 and selected_menu_index < 4:
-                                menu_area = selected_menu_index + 3
-                                selected_menu_index = 0
-                                old_selected_menu_index = 0
-                                sound_player.play_sound(coin_sound)
-                            elif selected_menu_index == 6:
-                                vsync = not vsync
-                                screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.RESIZABLE | (pygame.FULLSCREEN if fullscreen else 0), vsync=vsync)
-                                sound_player.play_sound(coin_sound)
-                            elif selected_menu_index == 7:
-                                selected_menu_index = 0
-                                old_selected_menu_index = 0
-                                menu_area = 1
-                                sound_player.play_sound(coin_sound)
-                        elif menu_options == title_screen[2] or menu_options == title_screen[3] or menu_options == title_screen[4] or menu_options == title_screen[5] and not binding_key:
-                            if selected_menu_index == 7:
-                                selected_menu_index = 0
-                                old_selected_menu_index = 0
-                                menu_area = 2
-                                sound_player.play_sound(coin_sound)
-                            else:
-                                binding_key = True
-                                current_bind = bind_table[selected_menu_index]
-                                sound_player.play_sound(sprout_sound)
-                                sound_player.stop_sound(powerup_sound)
-        
-            elif event.type == pygame.JOYBUTTONDOWN:
-                joystick = joysticks[event.joy]
-                if binding_key:
-                    if current_bind:
-                        if current_bind in controls_table[event.joy]:
-                            controls_table[event.joy][bind_table[selected_menu_index]] = joystick.get_button(event.button)
-                    binding_key = False
-                    current_bind = False
-                    sound_player.play_sound(powerup_sound)
-                    sound_player.stop_sound(sprout_sound)
-
-            elif event.type == pygame.JOYAXISMOTION:
-                joystick = joysticks[event.joy]
-                if abs(joystick.get_axis(0)) > deadzone and binding_key:
-                    controls_table[event.joy][bind_table[selected_menu_index]] = event.axis
-                else:
-                    binding_key = False
-                    current_bind = False
-                    sound_player.play_sound(powerup_sound)
-                    sound_player.stop_sound(sprout_sound)
-        
-        for player in intro_players:
-            player.update(title_ground)
         
         camera.update(intro_players, False, 15)
         
         title_ground.draw()
-
+        
         for player in intro_players:
             player.draw()
+            player.update(title_ground)
 
         if menu_options == title_screen[0]:
             for i in range(len(menu_options)):
@@ -820,7 +725,7 @@ while running:
                 display_text = text
                 if i == selected_menu_index:
                     display_text = f"> {display_text}"
-                    if (selected_menu_index >= 0 and selected_menu_index <= 3) or selected_menu_index == 8:
+                    if (selected_menu_index >= 0 and selected_menu_index <= 3) or selected_menu_index == 7:
                         display_text = f"{display_text} <"
 
                 create_text(
@@ -871,7 +776,7 @@ while running:
             logo.draw()
             logo.update()
         
-        if dt / FPS >= logo.bounce_time and title:
+        if dt / 60 >= logo.bounce_time and title:
             bgm_player.play_music("title")
             fade_out = True
             title = False
@@ -882,9 +787,132 @@ while running:
     if dt / FPS < logo.bounce_time + 1:
         logo.draw()
         logo.update()
+        
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+            menu = False
+            title = False
+            fade_in = False
+            fade_out = False
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_RETURN and event.mod & pygame.KMOD_ALT:
+                fullscreen = not fullscreen
+                pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.RESIZABLE | (pygame.FULLSCREEN if fullscreen else 0))
+            if menu and nor(title, fade_in, fade_out):
+                if binding_key:
+                    if event.key == pygame.K_ESCAPE:
+                        sound_player.play_sound(pipe_sound)
+                    else:
+                        sound_player.play_sound(powerup_sound)
+                        controls_table[menu_area - 3][bind_table[selected_menu_index]] = event.key
+                    binding_key = False
+                    current_bind = False
+                    sound_player.stop_sound(sprout_sound)
+                else:
+                    if event.key == controls["down"]:
+                        selected_menu_index += 1
+                    elif event.key == controls["up"]:
+                        selected_menu_index -= 1
+                if event.key == controls["left"]:
+                    if menu_options == title_screen[1]:
+                        if selected_menu_index == 4:
+                            mus_vol -= 0.1
+                        elif selected_menu_index == 5:
+                            snd_vol -= 0.1
+                        elif selected_menu_index == 6:
+                            deadzone -= 0.1
+                elif event.key == controls["right"]:
+                    if menu_options == title_screen[1]:
+                        if selected_menu_index == 4:
+                            mus_vol += 0.1
+                        elif selected_menu_index == 5:
+                            snd_vol += 0.1
+                        elif selected_menu_index == 6:
+                            deadzone += 0.1
+                elif event.key == controls["run"] and not binding_key:
+                    if menu_options == title_screen[1]:
+                        selected_menu_index = 0
+                        old_selected_menu_index = 0
+                        menu_area = 1
+                        sound_player.play_sound(pipe_sound)
+                    elif menu_options == title_screen[2]:
+                        selected_menu_index = 0
+                        old_selected_menu_index = 0
+                        menu_area = 2
+                        sound_player.play_sound(pipe_sound)
+                elif event.key == controls["jump"]:
+                    if menu_options == title_screen[0]:
+                        if selected_menu_index == 4:
+                            selected_menu_index = 0
+                            old_selected_menu_index = 0
+                            menu_area = 2
+                            sound_player.play_sound(coin_sound)
+                        else:
+                            fade_in = True
+                            game_ready = True
+                            bgm_player.stop_music()
+                            sound_player.play_sound(coin_sound)
+                            player_count = selected_menu_index + 1
+                    elif menu_options == title_screen[1]:
+                        if selected_menu_index >= 0 and selected_menu_index < 4:
+                            menu_area = selected_menu_index + 3
+                            selected_menu_index = 0
+                            old_selected_menu_index = 0
+                            sound_player.play_sound(coin_sound)
+                        elif selected_menu_index == 7:
+                            selected_menu_index = 0
+                            old_selected_menu_index = 0
+                            menu_area = 1
+                            sound_player.play_sound(coin_sound)
+                    elif menu_options == title_screen[2] or menu_options == title_screen[3] or menu_options == title_screen[4] or menu_options == title_screen[5] and not binding_key:
+                        if selected_menu_index == 7:
+                            selected_menu_index = 0
+                            old_selected_menu_index = 0
+                            menu_area = 2
+                            sound_player.play_sound(coin_sound)
+                        else:
+                            binding_key = True
+                            current_bind = bind_table[selected_menu_index]
+                            sound_player.play_sound(sprout_sound)
+                            sound_player.stop_sound(powerup_sound)
+    
+        elif event.type == pygame.JOYBUTTONDOWN and binding_key:
+            joystick = joysticks[event.joy]
+            if binding_key:
+                if current_bind:
+                    if current_bind in controls_table[event.joy]:
+                        controls_table[event.joy][bind_table[selected_menu_index]] = joystick.get_button(event.button)
+                binding_key = False
+                current_bind = False
+                sound_player.play_sound(powerup_sound)
+                sound_player.stop_sound(sprout_sound)
+
+        elif event.type == pygame.JOYAXISMOTION and binding_key:
+            joystick = joysticks[event.joy]
+            if abs(joystick.get_axis(0)) > deadzone:
+                controls_table[event.joy][bind_table[selected_menu_index]] = event.axis
+            else:
+                binding_key = False
+                current_bind = False
+                sound_player.play_sound(powerup_sound)
+                sound_player.stop_sound(sprout_sound)
     
     bgm_player.update()
     pygame.display.flip()
     clock.tick(FPS)
 
 pygame.quit()
+
+with open(f"{main_directory}/settings.json", "w") as settings:
+    json.dump(
+        {
+            "mus_vol": mus_vol,
+            "snd_vol": snd_vol,
+            "controls": controls,
+            "controls2": controls2,
+            "controls3": controls3,
+            "controls4": controls4,
+            "deadzone": deadzone,
+            "fullscreen": fullscreen
+        }, settings, indent=4)
