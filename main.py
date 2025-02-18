@@ -92,6 +92,7 @@ MIN_SPEEDX = pi / 10
 MIN_RUN_TIMER = 0
 MAX_RUN_TIMER = 75
 FPS = 100
+FRAME_SPEED = 10
 
 class SFXPlayer:
     def __init__(self):
@@ -184,8 +185,14 @@ class Camera:
         self.y = 0
 
     def update(self, players, max_x, max_y):
-        self.x = range_number(sum(player.rect.x + player.rect.width for player in players) / len(players) - SCREEN_WIDTH // 2, 0, (max_x if max_x else infinity))
-        self.y = range_number(sum(player.rect.y + player.rect.height for player in players) / len(players) - SCREEN_HEIGHT // 2, 0, (max_y if max_y else infinity))
+        self.x = range_number(
+            sum(player.rect.x + player.rect.width - player.speedx for player in players) / len(players) - SCREEN_WIDTH // 2,
+            0, (max_x if max_x else float('inf'))
+        )
+        self.y = range_number(
+            sum(player.rect.y + player.rect.height - player.speedy for player in players) / len(players) - SCREEN_HEIGHT // 2,
+            0, (max_y if max_y else float('inf'))
+        )
 
 class Logo:
     def __init__(self):
@@ -281,13 +288,40 @@ class PowerMeter:
         draw_y = self.player.rect.y - camera.y - 12
         if self.player.controls_enabled:
             screen.blit(sprite, (draw_x, draw_y))
-        
+
+class Brick:
+    def __init__(self, x, y, spriteset=1):
+        self.x = x
+        self.y = y
+        self.spriteset = spriteset - 1
+        self.image = load_sprite("brick")
+        self.img_width, self.img_height = self.image.get_size()
+
+        self.tile_width = 16
+        self.tile_height = 16
+        self.rect = pygame.Rect(x, y, self.tile_width, self.tile_height)
+        self.cols = self.img_width // self.tile_width
+        self.rows = self.img_height // self.tile_height
+
+        self.sprites = [[pygame.Rect(col * self.tile_width, row * self.tile_height, self.tile_width, self.tile_height) for col in range(self.cols)] for row in range(self.rows)]
+
+        self.total_frames = self.cols
+        self.frame_index = 0
+
+    def update(self):
+        self.frame_index = int(dt / (FPS / self.cols)) % self.total_frames
+
+    def draw(self):
+        if 0 <= self.spriteset < self.rows and 0 <= self.frame_index < self.cols:
+            sprite_rect = self.sprites[self.spriteset][self.frame_index]
+            sprite = self.image.subsurface(sprite_rect)
+            screen.blit(sprite, (self.x - camera.x, self.y - camera.y))
+
 class Player:
     def __init__(self, x, y, walk_frames=6, run_frames=3, character="mario", acceleration=0.1, max_jump=4, controls_enabled=True, speedx=0, walk_cutscene=False):
         self.spritesheet = load_sprite(character)
         self.controls_enabled = controls_enabled
         self.character = character
-        self.rect = pygame.Rect(x, y, 20, 102)
         self.speedx = speedx
         self.speedy = 0
         self.frame_timer = 0
@@ -308,7 +342,9 @@ class Player:
             "yellowtoad": (230, 158, 18),
             "bluetoad": (80, 80, 255)
         }
-        self.sprites = [[pygame.Rect(x * 20, y * 34, 20, 34) for x in range(18)] for y in range(3)]
+        self.img_width, self.img_height = self.spritesheet.get_size()
+        self.rect = pygame.Rect(x, y, self.img_width, self.img_height)
+        self.sprites = [[pygame.Rect(x * 20, y * 34, 20, 34) for x in range(self.img_width // 20)] for y in range(self.img_height // 34)]
         self.size = 1
         self.acceleration = acceleration
         self.max_jump = max_jump
@@ -320,6 +356,7 @@ class Player:
         self.jump_lock = False
         self.update_hitbox()
         self.rect.y -= self.rect.height
+        self.carrying_item = False
         self.controls_table = {
             "mario": controls,
             "luigi": controls2,
@@ -343,11 +380,11 @@ class Player:
             self.run = keys[self.controls["run"]]
             self.jump = keys[self.controls["jump"]]
             self.crouch = keys[self.controls["down"]] if self.on_ground else self.crouch
+            self.speed = RUN_SPEED if self.run else WALK_SPEED
 
         self.update_hitbox()
-        self.speed = RUN_SPEED if self.run else WALK_SPEED
 
-        if self.on_ground and nor(self.crouch, self.walk_cutscene):
+        if self.on_ground and not self.walk_cutscene:
             if self.left and not self.right:
                 self.speedx = max(self.speedx - self.acceleration, -self.speed)
                 self.facing_right = False if self.on_ground else self.facing_right
@@ -359,7 +396,6 @@ class Player:
                     self.speedx = 0
                 else:
                     self.speedx *= (1 - self.acceleration)
-
         else:
             if self.left and not self.right:
                 if self.speedx > 0:  
@@ -393,17 +429,19 @@ class Player:
                 self.run_timer = max(self.run_timer - 1, MIN_RUN_TIMER)
 
         new_x = self.rect.x + self.speedx
+        self.rect.x = new_x
 
         if new_x < camera.x and self.speedx < 0:
             self.speedx = 0
         elif new_x + self.rect.width > camera.x + SCREEN_WIDTH and self.speedx > 0:
             self.speedx = 0
-        else:
-            self.rect.x = new_x
+
+        if self.crouch and self.on_ground:
+            self.speedx *= (1 - self.acceleration)
 
         self.rect.y += self.speedy
-        self.rect.x = max(camera.x, min(self.rect.x, camera.x + SCREEN_WIDTH - self.rect.width))
-        self.rect.y = max(camera.y, min(self.rect.y, camera.y + SCREEN_HEIGHT - self.rect.height))
+        self.rect.x = range_number(camera.x + SCREEN_WIDTH - self.rect.width, camera.x, self.rect.x)
+        self.rect.y = range_number(camera.y + SCREEN_HEIGHT - self.rect.height, camera.y, self.rect.y)
         
         ground.check_collision(self)
         if self.on_ground:
@@ -415,27 +453,33 @@ class Player:
                     self.speedx += self.acceleration
 
         if self.crouch:
-            self.anim_state = 3 if self.speedy > 0 else 2
+            self.anim_state = (3 if self.speedy > 0 else 2) + (8 + self.walk_frames + self.run_frames if self.carrying_item else 0)
         elif self.skidding:
-            self.anim_state = 4 + self.walk_frames
+            if self.carrying_item:
+                self.frame_timer += abs(self.speedx) / 1.25
+                self.anim_state = (12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames
+            else:
+                self.anim_state = 4 + self.walk_frames
         elif self.speedy < 0:
-            self.anim_state = (7 + self.run_frames if self.pspeed else 5) + self.walk_frames
+            self.anim_state = ((12 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0)) if self.carrying_item else (7 + self.run_frames if self.pspeed else 5)) + self.walk_frames
         elif self.speedy >= 0 and nor(self.on_ground, self.crouch):
-            self.anim_state = (8 + self.run_frames if self.pspeed else 6) + self.walk_frames
+            self.anim_state = ((13 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0)) if self.carrying_item else (8 + self.run_frames if self.pspeed else 6)) + self.walk_frames
         elif self.speedx == 0 and self.on_ground and not self.crouch:
-            self.anim_state = 1
+            self.anim_state = (9 + self.walk_frames + self.run_frames) if self.carrying_item else 1
             self.speedx = 0
-        elif abs(self.speedx) > 0 and self.on_ground and not self.pspeed:
+        elif abs(self.speedx) > 0 and self.on_ground and not self.pspeed or self.carrying_item:
             self.frame_timer += abs(self.speedx) / 1.25
-            self.anim_state = 4 + int(self.frame_timer // 6) % self.walk_frames
-        elif self.pspeed and self.on_ground:
+            self.anim_state = (12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames
+        elif self.pspeed and self.on_ground and not self.carrying_item:
             self.frame_timer += abs(self.speedx) / 1.25
-            self.anim_state = 7 + self.walk_frames + int(self.frame_timer // 6) % self.run_frames
+            self.anim_state = 7 + self.walk_frames + int(self.frame_timer // FRAME_SPEED) % self.run_frames
 
     def draw(self):
         sprite = self.spritesheet.subsurface(self.sprites[self.size][self.anim_state - 1])
         sprite = pygame.transform.flip(sprite, not self.facing_right, False)
-        draw_x = self.rect.x - camera.x + (((1 if self.character == "mario" else 2 if self.character == "luigi" else 0) if self.anim_state == 16 or self.anim_state == 17 else 0) * (1 if not self.facing_right else -1))
+
+        draw_x = self.rect.x - camera.x + (((1 if self.character == "mario" else 2 if self.character == "luigi" else 0) if self.anim_state == 7 + self.run_frames + self.walk_frames or self.anim_state == 8 + self.run_frames + self.walk_frames or self.anim_state == 14 + self.run_frames + self.walk_frames * 2 or self.anim_state == 15 + self.run_frames + self.walk_frames * 2 else 0) * (1 if not self.facing_right else -1))
+
         draw_y = self.rect.y - camera.y + self.rect.height - 33
         screen.blit(sprite, (draw_x, draw_y))
 
@@ -495,7 +539,8 @@ if exists(f"{main_directory}/settings.json") and not getsize(f"{main_directory}/
 running = True
 centerx = SCREEN_WIDTH / 2
 centery = SCREEN_HEIGHT / 2
-font = pygame.font.Font(f"{main_directory}/font.ttf", 16)
+font_size = 16
+font = pygame.font.Font(f"{main_directory}/font.ttf", font_size)
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.RESIZABLE | (pygame.FULLSCREEN if fullscreen else 0))
 clock = pygame.time.Clock()
 pygame.display.set_icon(load_sprite("icon"))
@@ -567,6 +612,7 @@ title = True
 bind_table = ["up", "down", "left", "right", "run", "jump", "pause"]
 binding_key = False
 current_bind = False
+game_ready = False
 
 if pygame.joystick.get_count() > 0:
     pygame.joystick.init()
@@ -587,7 +633,7 @@ while running:
     mus_vol = round(range_number(mus_vol, 0, 1) * 10) / 10
     snd_vol = round(range_number(snd_vol, 0, 1) * 10) / 10
     deadzone = round(range_number(deadzone, 0.1, 1) * 10) / 10
-    if nor(old_selected_menu_index == selected_menu_index, old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_deadzone == deadzone):
+    if nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_deadzone == deadzone):
         sound_player.play_sound(beep_sound)
     old_mus_vol = mus_vol
     old_snd_vol = snd_vol
@@ -624,7 +670,7 @@ while running:
                 ["controls (p4)", centery * 1.3],
                 ["music volume:", centery * 1.4, mus_vol],
                 ["sound volume:", centery * 1.5, snd_vol],
-                ["joystick deadzone:", centery * 1.6, deadzone],
+                ["deadzone:", centery * 1.6, deadzone],
                 ["back", centery * 1.75]
             ],
             [
@@ -675,6 +721,8 @@ while running:
 
         menu_options = title_screen[menu_area - 1]
         selected_menu_index = range_number(selected_menu_index, 0, len(menu_options) - 1)
+        if old_selected_menu_index != selected_menu_index:
+            sound_player.play_sound(beep_sound)
         old_selected_menu_index = selected_menu_index
         
         camera.update(intro_players, False, 15)
@@ -716,7 +764,7 @@ while running:
 
                     create_text(
                         text=display_state.upper(),
-                        position=(centerx * 1.5 + (18 if get_last_chars(display_state, 2) == " <" else 0), y),
+                        position=(centerx * 1.5 + ((font_size * 2) if get_last_chars(display_state, 2) == " <" else 0), y),
                         alignment="right",
                         stickxtocamera=True
                     )
@@ -729,7 +777,7 @@ while running:
 
                 create_text(
                     text=display_text.upper(),
-                    position=(centerx / 2 - (18 if get_chars(display_text, 2) == "> " else 0), y),
+                    position=(centerx / 2 - ((font_size * 2) if get_chars(display_text, 2) == "> " else 0), y),
                     alignment="left",
                     stickxtocamera=True
                 )
@@ -753,7 +801,7 @@ while running:
 
                     create_text(
                         text=display_state.upper(),
-                        position=(centerx * 1.5 + (18 if get_last_chars(display_state, 2) == " <" else 0), y),
+                        position=(centerx * 1.5 + ((font_size * 2) if get_last_chars(display_state, 2) == " <" else 0), y),
                         alignment="right",
                         stickxtocamera=True
                     )
@@ -766,7 +814,7 @@ while running:
 
                 create_text(
                     text=display_text.upper(),
-                    position=(centerx / 2 - (18 if get_chars(display_text, 2) == "> " else 0), y),
+                    position=(centerx / 2 - ((font_size * 2) if get_chars(display_text, 2) == "> " else 0), y),
                     alignment="left",
                     stickxtocamera=True
                 )
@@ -798,7 +846,7 @@ while running:
             if event.key == pygame.K_RETURN and event.mod & pygame.KMOD_ALT:
                 fullscreen = not fullscreen
                 pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.RESIZABLE | (pygame.FULLSCREEN if fullscreen else 0))
-            if menu and nor(title, fade_in, fade_out):
+            if menu and nor(title, fade_in, fade_out, game_ready):
                 if binding_key:
                     if event.key == pygame.K_ESCAPE:
                         sound_player.play_sound(pipe_sound)
