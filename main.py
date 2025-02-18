@@ -1,6 +1,6 @@
 import pygame, json
 from os.path import dirname, abspath, exists, getsize
-from math import pi
+import math
 
 pygame.init()
 pygame.font.init()
@@ -84,11 +84,11 @@ def create_text(text, position, color=(255, 255, 255), alignment="left", stickxt
         for char_surface, char_x in rendered_line:
             screen.blit(char_surface, (start_x + char_x, line_y))
 
-SCREEN_WIDTH, SCREEN_HEIGHT = 640, 360
+SCREEN_WIDTH, SCREEN_HEIGHT = 640, 400
 WALK_SPEED = 2.5
 RUN_SPEED = 4
 JUMP_HOLD_TIME = 10
-MIN_SPEEDX = pi / 10
+MIN_SPEEDX = math.pi / 10
 MIN_RUN_TIMER = 0
 MAX_RUN_TIMER = 75
 FPS = 100
@@ -123,20 +123,23 @@ class BGMPlayer:
         self.loop_point = 0
         self.music_playing = False
         self.music_length = 0
-        self.music_path = None
-        self.replay_enabled = False
 
-    def play_music(self, music, loop_point=0):
-        self.music_path = load_asset(f"bgm_{music}.ogg")
-        pygame.mixer.music.load(self.music_path)
-        pygame.mixer.music.play(loops=-1 if self.loop_point == 0 else 0)
-        if loop_point:
-            self.loop_point = loop_point / 1000
+    def play_music(self, music):
+        self.stop_music()
+        pygame.mixer.music.load(load_asset(f"bgm_{music}.ogg"))
+        self.loop_point = dict(music_table)[music]
+        if self.loop_point != 0:
+            pygame.mixer.music.play(0)
+            self.loop_point = self.loop_point / 1000
             self.music_playing = True
-            self.music_length = pygame.mixer.Sound(self.music_path).get_length()
-            self.replay_enabled = False
+        else:
+            if self.loop_point:
+                pygame.mixer.music.play(-1)
+            else:
+                pygame.mixer.music.play(0)
 
     def stop_music(self):
+        self.music_playing = False
         pygame.mixer.music.stop()
 
     def set_volume(self, volume):
@@ -186,11 +189,11 @@ class Camera:
 
     def update(self, players, max_x, max_y):
         self.x = range_number(
-            sum(player.rect.x + player.rect.width - player.speedx for player in players) / len(players) - SCREEN_WIDTH // 2,
+            sum(player.rect.x + player.rect.width + player.speedx for player in players) / len(players) - SCREEN_WIDTH // 2,
             0, (max_x if max_x else float('inf'))
         )
         self.y = range_number(
-            sum(player.rect.y + player.rect.height - player.speedy for player in players) / len(players) - SCREEN_HEIGHT // 2,
+            sum(player.rect.y + player.rect.height + player.speedy for player in players) / len(players) - SCREEN_HEIGHT // 2,
             0, (max_y if max_y else float('inf'))
         )
 
@@ -200,23 +203,24 @@ class Logo:
         self.y = -88
         self.speedy = 0
         self.timer = 0
+        self.bounce_y = 48
         self.bounce_time = 3
         self.spritesheet = load_sprite("logo")
 
     def update(self):
         self.timer = min(self.timer + 1, self.bounce_time * 60)
-        canbounce = self.y < 64
+        canbounce = self.y < self.bounce_y
         if self.timer < self.bounce_time * 60:
             self.y += self.speedy
             self.speedy += 0.25
-        if self.y > 64 and canbounce and self.speedy != 0 and self.timer > 0:
+        if self.y > self.bounce_y and canbounce and self.speedy != 0 and self.timer > 0:
             sound_player.play_sound(bump_sound)
             self.speedy /= -1.5
             self.y -= 0.25
-        if self.timer == self.bounce_time * 60 and self.y > 64:
+        if self.timer == self.bounce_time * 60 and self.y > self.bounce_y:
             sound_player.play_sound(bump_sound)
             self.speedy = 0
-            self.y = 64
+            self.y = self.bounce_y
 
     def draw(self):
         screen.blit(self.spritesheet, (self.x, self.y))
@@ -224,7 +228,7 @@ class Logo:
 class TitleGround:
     def __init__(self):
         self.y = SCREEN_HEIGHT - 8
-        self.sprite = load_sprite("groundtile")
+        self.sprite = load_sprite("ground")
 
     def check_collision(self, mario):
         mario.on_ground = mario.rect.bottom >= self.y
@@ -236,15 +240,6 @@ class TitleGround:
         for y in range(2):
             for x in range(0, SCREEN_WIDTH + 32, 16):
                 screen.blit(self.sprite, (x + offset_x - 16, self.y + 16 * y - camera.y))
-
-class Ground:
-    def __init__(self, y):
-        self.y = y
-
-    def check_collision(self, mario):
-        mario.on_ground = mario.rect.bottom >= self.y
-        if mario.rect.bottom >= self.y:
-            mario.rect.bottom = self.y
 
 class PowerMeter:
     def __init__(self, player):
@@ -289,21 +284,39 @@ class PowerMeter:
         if self.player.controls_enabled:
             screen.blit(sprite, (draw_x, draw_y))
 
-class Brick:
-    def __init__(self, x, y, spriteset=1):
+class Tile:
+    def __init__(self, x, y, image, spriteset=1):
         self.x = x
         self.y = y
         self.spriteset = spriteset - 1
-        self.image = load_sprite("brick")
+        self.image = load_sprite(image)
+        self.img_width, self.img_height = self.image.get_size()
+        self.tile_size = 16
+        self.rect = pygame.Rect(x, y, 16, self.tile_size)
+        self.cols = 1
+        self.rows = self.img_height // self.tile_size
+        self.sprites = [pygame.Rect(0, row * self.tile_size, 16, self.tile_size) for row in range(self.rows)]
+
+    def draw(self):
+        if 0 <= self.spriteset < self.rows:
+            screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y))
+
+class AnimatedTile:
+    def __init__(self, x, y, image, spriteset=1):
+        self.x = x
+        self.y = y
+        self.spriteset = spriteset - 1
+
+        self.image = load_sprite(image)
         self.img_width, self.img_height = self.image.get_size()
 
-        self.tile_width = 16
-        self.tile_height = 16
-        self.rect = pygame.Rect(x, y, self.tile_width, self.tile_height)
-        self.cols = self.img_width // self.tile_width
-        self.rows = self.img_height // self.tile_height
+        self.tile_size = 16
+        self.rect = pygame.Rect(x, y, self.tile_size, self.tile_size)
 
-        self.sprites = [[pygame.Rect(col * self.tile_width, row * self.tile_height, self.tile_width, self.tile_height) for col in range(self.cols)] for row in range(self.rows)]
+        self.cols = self.img_width // self.tile_size
+        self.rows = self.img_height // self.tile_size
+
+        self.sprites = [[pygame.Rect(col * self.tile_size, row * self.tile_size, self.tile_size, self.tile_size) for col in range(self.cols)] for row in range(self.rows)]
 
         self.total_frames = self.cols
         self.frame_index = 0
@@ -313,16 +326,18 @@ class Brick:
 
     def draw(self):
         if 0 <= self.spriteset < self.rows and 0 <= self.frame_index < self.cols:
-            sprite_rect = self.sprites[self.spriteset][self.frame_index]
-            sprite = self.image.subsurface(sprite_rect)
-            screen.blit(sprite, (self.x - camera.x, self.y - camera.y))
+            screen.blit(self.image.subsurface(self.sprites[self.spriteset][self.frame_index]), (self.x - camera.x, self.y - camera.y))
+
+class Brick(AnimatedTile):
+    def __init__(self, x, y, spriteset=1):
+        super().__init__(x, y, "brick", spriteset)
 
 class Player:
-    def __init__(self, x, y, walk_frames=6, run_frames=3, character="mario", acceleration=0.1, max_jump=4, controls_enabled=True, speedx=0, walk_cutscene=False):
+    def __init__(self, x, y, size=0, walk_frames=6, run_frames=3, character="mario", acceleration=0.1, max_jump=4, controls_enabled=True, walk_cutscene=False):
         self.spritesheet = load_sprite(character)
         self.controls_enabled = controls_enabled
         self.character = character
-        self.speedx = speedx
+        self.speedx = 0
         self.speedy = 0
         self.frame_timer = 0
         self.on_ground = False
@@ -345,7 +360,7 @@ class Player:
         self.img_width, self.img_height = self.spritesheet.get_size()
         self.rect = pygame.Rect(x, y, self.img_width, self.img_height)
         self.sprites = [[pygame.Rect(x * 20, y * 34, 20, 34) for x in range(self.img_width // 20)] for y in range(self.img_height // 34)]
-        self.size = 1
+        self.size = size
         self.acceleration = acceleration
         self.max_jump = max_jump
         self.walk_cutscene = walk_cutscene
@@ -423,7 +438,7 @@ class Player:
         self.pspeed = self.run_timer >= MAX_RUN_TIMER
 
         if self.on_ground and self.controls_enabled:
-            self.run_timer = range_number(self.run_timer + 1 if abs(self.speedx) == RUN_SPEED else self.run_timer - 1, MIN_RUN_TIMER, MAX_RUN_TIMER)
+            self.run_timer = MAX_RUN_TIMER if nitpicks["always_pspeed"] else range_number(self.run_timer + 1 if abs(self.speedx) == RUN_SPEED else self.run_timer - 1, MIN_RUN_TIMER, MAX_RUN_TIMER)
         else:
             if not self.pspeed:
                 self.run_timer = max(self.run_timer - 1, MIN_RUN_TIMER)
@@ -476,9 +491,9 @@ class Player:
 
     def draw(self):
         sprite = self.spritesheet.subsurface(self.sprites[self.size][self.anim_state - 1])
-        sprite = pygame.transform.flip(sprite, not self.facing_right, False)
+        sprite = pygame.transform.flip(sprite, (not self.facing_right) ^ nitpicks["moonwalking_mario"], nitpicks["upside_down_mario"])
 
-        draw_x = self.rect.x - camera.x + (((1 if self.character == "mario" else 2 if self.character == "luigi" else 0) if self.anim_state == 7 + self.run_frames + self.walk_frames or self.anim_state == 8 + self.run_frames + self.walk_frames or self.anim_state == 14 + self.run_frames + self.walk_frames * 2 or self.anim_state == 15 + self.run_frames + self.walk_frames * 2 else 0) * (1 if not self.facing_right else -1))
+        draw_x = self.rect.x - camera.x + (((1 if self.character == "mario" else 2 if self.character == "luigi" else 0) if self.anim_state == 7 + self.run_frames + self.walk_frames or self.anim_state == 8 + self.run_frames + self.walk_frames or self.anim_state == 14 + self.run_frames + self.walk_frames * 2 or self.anim_state == 15 + self.run_frames + self.walk_frames * 2 else 0) * (1 if (not self.facing_right) ^ nitpicks["moonwalking_mario"] else -1))
 
         draw_y = self.rect.y - camera.y + self.rect.height - 33
         screen.blit(sprite, (draw_x, draw_y))
@@ -513,13 +528,13 @@ controls3 = {
     "pause": pygame.K_o
 }
 controls4 = {
-    "up": pygame.K_KP_8,
-    "down": pygame.K_KP_5,
-    "left": pygame.K_KP_4,
-    "right": pygame.K_KP_6,
-    "run": pygame.K_b,
-    "jump": pygame.K_q,
-    "pause": pygame.K_KP_0
+    "up": pygame.K_HOME,
+    "down": pygame.K_END,
+    "left": pygame.K_DELETE,
+    "right": pygame.K_PAGEDOWN,
+    "run": pygame.K_INSERT,
+    "jump": pygame.K_PAGEUP,
+    "pause": pygame.K_BREAK
 }
 fullscreen = False
 deadzone = 0.5
@@ -536,6 +551,25 @@ if exists(f"{main_directory}/settings.json") and not getsize(f"{main_directory}/
         deadzone = data.get("deadzone", deadzone)
         fullscreen = data.get("fullscreen", fullscreen)
 
+if not exists(f"{main_directory}/nitpicks.json"):
+    with open(f"{main_directory}/nitpicks.json", "w") as nitpicks:
+        json.dump(
+            {
+                "upside_down_mario": False,
+                "upside_down_enemies": False,
+                "moonwalking_mario": False,
+                "moonwalking_enemies": False,
+                "always_pspeed": False
+            }, nitpicks, indent=4
+        )
+
+with open(f"{main_directory}/nitpicks.json", "r") as file:
+    nitpicks = json.load(file)
+
+music_table = [
+    ["overworld", 2136],
+    ["title", 3736]
+]
 running = True
 centerx = SCREEN_WIDTH / 2
 centery = SCREEN_HEIGHT / 2
@@ -551,30 +585,14 @@ intro_players = [Player(
     y=SCREEN_HEIGHT,
     character=character,
     controls_enabled=False,
-    speedx=1.25,
-    walk_cutscene=True,
+    size=1,
     **properties)
     for i, (character, properties) in enumerate(
         [
             ("mario", {}),
-            (
-                "luigi", {
-                    "acceleration": 0.05,
-                    "max_jump": 5
-                }
-            ),
-            (
-                "yellowtoad", {
-                    "acceleration": 0.2,
-                    "walk_frames": 3
-                }
-            ),
-            (
-                "bluetoad", {
-                    "acceleration": 0.25,
-                    "walk_frames": 3
-                }
-            )
+            ("luigi", {"acceleration": 0.05, "max_jump": 5}),
+            ("yellowtoad", {"acceleration": 0.2}),
+            ("bluetoad", {"acceleration": 0.25})
         ]
     )
 ]
@@ -588,6 +606,7 @@ bump_sound = load_sound("bump")
 coin_sound = load_sound("coin")
 jump_sound = load_sound("jump")
 jumpbig_sound = load_sound("jumpbig")
+oneup_sound = load_sound("oneup")
 pipe_sound = load_sound("pipe")
 powerup_sound = load_sound("powerup")
 pspeed_sound = load_sound("pspeed")
@@ -625,6 +644,7 @@ while running:
     sound_player.set_volume(snd_vol)
     SCREEN_WIDTH, SCREEN_HEIGHT = pygame.display.get_surface().get_size()
     pygame.display.set_caption(f"Super Mario Bros. for Python (FPS: {round(clock.get_fps())})")
+    current_fps = FPS if clock.get_fps() == 0 else clock.get_fps()
     screen.fill((0, 0, 0))
     keys = pygame.key.get_pressed()
     
@@ -639,6 +659,19 @@ while running:
     old_snd_vol = snd_vol
     old_deadzone = deadzone
     pspeed_sound.set_volume(0 if is_playing(jump_sound) or is_playing(jumpbig_sound) else 1)
+
+    with open(f"{main_directory}/settings.json", "w") as settings:
+        json.dump(
+            {
+                "mus_vol": mus_vol,
+                "snd_vol": snd_vol,
+                "controls": controls,
+                "controls2": controls2,
+                "controls3": controls3,
+                "controls4": controls4,
+                "deadzone": deadzone,
+                "fullscreen": fullscreen
+            }, settings, indent=4)
 
     if fade_in:
         fade_out = False
@@ -657,61 +690,62 @@ while running:
     if menu:
         title_screen = [
             [
-                ["1 player game", centery],
-                ["2 player game", centery * 1.125],
-                ["3 player game", centery * 1.25],
-                ["4 player game", centery * 1.375],
-                ["options", centery * 1.5]
+                ["1 player game", centery * 0.75],
+                ["2 player game", centery * 0.875],
+                ["3 player game", centery],
+                ["4 player game", centery * 1.125],
+                ["options", centery * 1.25],
+                ["quit", centery * 1.375]
             ],
             [
-                ["controls (p1)", centery],
-                ["controls (p2)", centery * 1.1],
-                ["controls (p3)", centery * 1.2],
-                ["controls (p4)", centery * 1.3],
-                ["music volume:", centery * 1.4, mus_vol],
-                ["sound volume:", centery * 1.5, snd_vol],
-                ["deadzone:", centery * 1.6, deadzone],
-                ["back", centery * 1.75]
+                ["controls (mario)", centery * 0.75, (247, 57, 16)],
+                ["controls (luigi)", centery * 0.875, (33, 173, 16)],
+                ["controls (yellow toad)", centery, (230, 158, 18)],
+                ["controls (blue toad)", centery * 1.125, (80, 80, 255)],
+                [f"music volume: {int(mus_vol * 100)}%", centery * 1.25],
+                [f"sound volume: {int(snd_vol * 100)}%", centery * 1.375],
+                [f"deadzone: {deadzone}", centery * 1.5],
+                ["back", centery * 1.625]
             ],
             [
-                [f"{bind_table[0]} (p1):", centery, controls[bind_table[0]]],
-                [f"{bind_table[1]} (p1):", centery * 1.1, controls[bind_table[1]]],
-                [f"{bind_table[2]} (p1):", centery * 1.2, controls[bind_table[2]]],
-                [f"{bind_table[3]} (p1):", centery * 1.3, controls[bind_table[3]]],
-                [f"{bind_table[4]} (p1):", centery * 1.4, controls[bind_table[4]]],
-                [f"{bind_table[5]} (p1):", centery * 1.5, controls[bind_table[5]]],
-                [f"{bind_table[6]} (p1):", centery * 1.6, controls[bind_table[6]]],
-                ["back", centery * 1.75]
+                [f"{bind_table[0]} (mario): {pygame.key.name(controls[bind_table[0]])}", centery * 0.75],
+                [f"{bind_table[1]} (mario): {pygame.key.name(controls[bind_table[1]])}", centery * 0.875],
+                [f"{bind_table[2]} (mario): {pygame.key.name(controls[bind_table[2]])}", centery],
+                [f"{bind_table[3]} (mario): {pygame.key.name(controls[bind_table[3]])}", centery * 1.125],
+                [f"{bind_table[4]} (mario): {pygame.key.name(controls[bind_table[4]])}", centery * 1.25],
+                [f"{bind_table[5]} (mario): {pygame.key.name(controls[bind_table[5]])}", centery * 1.375],
+                [f"{bind_table[6]} (mario): {pygame.key.name(controls[bind_table[6]])}", centery * 1.5],
+                ["back", centery * 1.625]
             ],
             [
-                [f"{bind_table[0]} (p2):", centery, controls2[bind_table[0]]],
-                [f"{bind_table[1]} (p2):", centery * 1.1, controls2[bind_table[1]]],
-                [f"{bind_table[2]} (p2):", centery * 1.2, controls2[bind_table[2]]],
-                [f"{bind_table[3]} (p2):", centery * 1.3, controls2[bind_table[3]]],
-                [f"{bind_table[4]} (p2):", centery * 1.4, controls2[bind_table[4]]],
-                [f"{bind_table[5]} (p2):", centery * 1.5, controls2[bind_table[5]]],
-                [f"{bind_table[6]} (p2):", centery * 1.6, controls2[bind_table[6]]],
-                ["back", centery * 1.75]
+                [f"{bind_table[0]} (luigi): {pygame.key.name(controls2[bind_table[0]])}", centery * 0.75],
+                [f"{bind_table[1]} (luigi): {pygame.key.name(controls2[bind_table[1]])}", centery * 0.875],
+                [f"{bind_table[2]} (luigi): {pygame.key.name(controls2[bind_table[2]])}", centery],
+                [f"{bind_table[3]} (luigi): {pygame.key.name(controls2[bind_table[3]])}", centery * 1.125],
+                [f"{bind_table[4]} (luigi): {pygame.key.name(controls2[bind_table[4]])}", centery * 1.25],
+                [f"{bind_table[5]} (luigi): {pygame.key.name(controls2[bind_table[5]])}", centery * 1.375],
+                [f"{bind_table[6]} (luigi): {pygame.key.name(controls2[bind_table[6]])}", centery * 1.5],
+                ["back", centery * 1.625]
             ],
             [
-                [f"{bind_table[0]} (p3):", centery, controls3[bind_table[0]]],
-                [f"{bind_table[1]} (p3):", centery * 1.1, controls3[bind_table[1]]],
-                [f"{bind_table[2]} (p3):", centery * 1.2, controls3[bind_table[2]]],
-                [f"{bind_table[3]} (p3):", centery * 1.3, controls3[bind_table[3]]],
-                [f"{bind_table[4]} (p3):", centery * 1.4, controls3[bind_table[4]]],
-                [f"{bind_table[5]} (p3):", centery * 1.5, controls3[bind_table[5]]],
-                [f"{bind_table[6]} (p3):", centery * 1.6, controls3[bind_table[6]]],
-                ["back", centery * 1.75]
+                [f"{bind_table[0]} (yellow toad): {pygame.key.name(controls3[bind_table[0]])}", centery * 0.75],
+                [f"{bind_table[1]} (yellow toad): {pygame.key.name(controls3[bind_table[1]])}", centery * 0.875],
+                [f"{bind_table[2]} (yellow toad): {pygame.key.name(controls3[bind_table[2]])}", centery],
+                [f"{bind_table[3]} (yellow toad): {pygame.key.name(controls3[bind_table[3]])}", centery * 1.125],
+                [f"{bind_table[4]} (yellow toad): {pygame.key.name(controls3[bind_table[4]])}", centery * 1.25],
+                [f"{bind_table[5]} (yellow toad): {pygame.key.name(controls3[bind_table[5]])}", centery * 1.375],
+                [f"{bind_table[6]} (yellow toad): {pygame.key.name(controls3[bind_table[6]])}", centery * 1.5],
+                ["back", centery * 1.625]
             ],
             [
-                [f"{bind_table[0]} (p4):", centery, controls4[bind_table[0]]],
-                [f"{bind_table[1]} (p4):", centery * 1.1, controls4[bind_table[1]]],
-                [f"{bind_table[2]} (p4):", centery * 1.2, controls4[bind_table[2]]],
-                [f"{bind_table[3]} (p4):", centery * 1.3, controls4[bind_table[3]]],
-                [f"{bind_table[4]} (p4):", centery * 1.4, controls4[bind_table[4]]],
-                [f"{bind_table[5]} (p4):", centery * 1.5, controls4[bind_table[5]]],
-                [f"{bind_table[6]} (p4):", centery * 1.6, controls4[bind_table[6]]],
-                ["back", centery * 1.75]
+                [f"{bind_table[0]} (blue toad): {pygame.key.name(controls4[bind_table[0]])}", centery * 0.75],
+                [f"{bind_table[1]} (blue toad): {pygame.key.name(controls4[bind_table[1]])}", centery * 0.875],
+                [f"{bind_table[2]} (blue toad): {pygame.key.name(controls4[bind_table[2]])}", centery],
+                [f"{bind_table[3]} (blue toad): {pygame.key.name(controls4[bind_table[3]])}", centery * 1.125],
+                [f"{bind_table[4]} (blue toad): {pygame.key.name(controls4[bind_table[4]])}", centery * 1.25],
+                [f"{bind_table[5]} (blue toad): {pygame.key.name(controls4[bind_table[5]])}", centery * 1.375],
+                [f"{bind_table[6]} (blue toad): {pygame.key.name(controls4[bind_table[6]])}", centery * 1.5],
+                ["back", centery * 1.625]
             ]
         ]
         dt += 1
@@ -736,90 +770,49 @@ while running:
         if menu_options == title_screen[0]:
             for i in range(len(menu_options)):
                 options = menu_options[i]
-                text = options[0]
-                y = options[1]
                 
-                display_text = text
-                if i == selected_menu_index:
-                    display_text = f"> {display_text} <"
+                display_text = f"> {options[0]} <" if i == selected_menu_index else options[0]
 
                 create_text(
                     text=display_text.upper(),
-                    position=(centerx, y),
+                    position=(centerx, options[1]),
                     alignment="center",
                     stickxtocamera=True
                 )
         elif menu_options == title_screen[1]:
             for i in range(len(menu_options)):
                 options = menu_options[i]
-                text = options[0]
-                y = options[1]
-                if len(options) == 3:
-                    state = str(options[2])
-                    if i == 4 or i == 5:
-                        state = f"{int(float(state) * 100)}%"
-                    display_state = state
-                    if i == selected_menu_index:
-                        display_state = f"{display_state} <"
-
-                    create_text(
-                        text=display_state.upper(),
-                        position=(centerx * 1.5 + ((font_size * 2) if get_last_chars(display_state, 2) == " <" else 0), y),
-                        alignment="right",
-                        stickxtocamera=True
-                    )
                 
-                display_text = text
-                if i == selected_menu_index:
-                    display_text = f"> {display_text}"
-                    if (selected_menu_index >= 0 and selected_menu_index <= 3) or selected_menu_index == 7:
-                        display_text = f"{display_text} <"
+                display_text = f"> {options[0]} <" if i == selected_menu_index else options[0]
 
                 create_text(
                     text=display_text.upper(),
-                    position=(centerx / 2 - ((font_size * 2) if get_chars(display_text, 2) == "> " else 0), y),
-                    alignment="left",
-                    stickxtocamera=True
+                    position=(centerx, options[1]),
+                    alignment="center",
+                    stickxtocamera=True,
+                    color=options[2] if len(options) == 3 else (255, 255, 255)
                 )
         elif menu_options == title_screen[2] or menu_options == title_screen[3] or menu_options == title_screen[4] or menu_options == title_screen[5]:
             for i in range(len(menu_options)):
                 options = menu_options[i]
-                text = options[0]
-                y = options[1]
-                if len(options) == 3:
-                    state = "..." if binding_key and selected_menu_index == i else pygame.key.name(options[2])
-                    if binding_key and selected_menu_index == i:
-                        create_text(
-                            text="PRESS ESC TO CANCEL BINDING",
-                            position=(centerx, centery * 0.875),
-                            alignment="center",
-                            stickxtocamera=True
-                        )
-                    display_state = state
-                    if i == selected_menu_index:
-                        display_state = f"{display_state} <"
-
+                if binding_key and selected_menu_index == i:
                     create_text(
-                        text=display_state.upper(),
-                        position=(centerx * 1.5 + ((font_size * 2) if get_last_chars(display_state, 2) == " <" else 0), y),
-                        alignment="right",
+                        text="PRESS ESC TO CANCEL BINDING",
+                        position=(centerx, centery * 1.875),
+                        alignment="center",
                         stickxtocamera=True
                     )
                 
-                display_text = text
-                if i == selected_menu_index:
-                    display_text = f"> {display_text}"
-                    if selected_menu_index == 7:
-                        display_text = f"{display_text} <"
+                display_text = f"> {options[0]} <" if i == selected_menu_index else options[0]
 
                 create_text(
                     text=display_text.upper(),
-                    position=(centerx / 2 - ((font_size * 2) if get_chars(display_text, 2) == "> " else 0), y),
-                    alignment="left",
+                    position=(centerx, options[1]),
+                    alignment="center",
                     stickxtocamera=True
                 )
 
-        if dt / FPS >= logo.bounce_time + 1:
+        if game_ready:
             logo.draw()
             logo.update()
         
@@ -827,11 +820,27 @@ while running:
             bgm_player.play_music("title")
             fade_out = True
             title = False
+            for player in intro_players:
+                player.speedx = 2
+                player.walk_cutscene = True
 
+    create_text(
+        text="press ctrl+shift+n to".upper(),
+        position=(centerx, centery / 20),
+        alignment="center",
+        stickxtocamera=True
+    )
+    create_text(
+        text="generate nitpicks file".upper(),
+        position=(centerx, centery / 8),
+        alignment="center",
+        stickxtocamera=True
+    )
+            
     fade_surface.fill((0, 0, 0, a))
     screen.blit(fade_surface, (0, 0))
 
-    if dt / FPS < logo.bounce_time + 1:
+    if not game_ready:
         logo.draw()
         logo.update()
         
@@ -895,6 +904,12 @@ while running:
                             old_selected_menu_index = 0
                             menu_area = 2
                             sound_player.play_sound(coin_sound)
+                        elif selected_menu_index == 5:
+                            running = False
+                            menu = False
+                            title = False
+                            fade_in = False
+                            fade_out = False
                         else:
                             fade_in = True
                             game_ready = True
@@ -962,4 +977,5 @@ with open(f"{main_directory}/settings.json", "w") as settings:
             "controls4": controls4,
             "deadzone": deadzone,
             "fullscreen": fullscreen
-        }, settings, indent=4)
+        }, settings, indent=4
+    )
