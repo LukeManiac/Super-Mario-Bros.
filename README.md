@@ -49,10 +49,10 @@ To run the game, you need the following dependencies:
 - **Pause:** O
 
 ### Player 4:
-- **Up:** 8 (keypad)
-- **Down:** 5 (keypad)
-- **Left:** 4 (keypad)
-- **Right:** 6 (keypad)
-- **Run:** B
-- **Jump:** Q
-- **Pause:** 0 (keypad)
+- **Up:** Home
+- **Down:** End
+- **Left:** Delete
+- **Right:** Page Down
+- **Run:** Insert
+- **Jump:** Page Up
+- **Pause:** Pause Break
