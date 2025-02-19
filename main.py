@@ -285,7 +285,7 @@ class PowerMeter:
             screen.blit(sprite, (draw_x, draw_y))
 
 class Tile:
-    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False):
+    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False, breakable=False):
         self.x = x * 16
         self.y = y * 16
         self.spriteset = spriteset - 1
@@ -302,6 +302,9 @@ class Tile:
         self.top_collide = top_collide
         self.bottom_collide = bottom_collide
         self.bonk_bounce = bonk_bounce
+        self.breakable = breakable
+
+        self.broken = False
         
         self.bouncing = False
         self.bounce_timer = 0
@@ -317,8 +320,20 @@ class Tile:
                 self.y_offset = 0
                 self.bouncing = False
 
+    def break_block(self):
+        if self.breakable:
+            self.broken = True
+            self.bouncing = False
+            self.y_offset = 0
+            self.left_collide = False
+            self.right_collide = False
+            self.top_collide = False
+            self.bottom_collide = False
+            self.bonk_bounce = False
+            self.breakable = False
+
     def draw(self):
-        if 0 <= self.spriteset < self.rows:
+        if 0 <= self.spriteset < self.rows and not self.broken:
             screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y + (self.y_offset * (-1 if nitpicks["inverted_block_bounce"] else 1))))
 
 class AnimatedTile(Tile):
@@ -458,11 +473,11 @@ class Player:
 
         self.rect.x += self.speedx
         for tile in tiles:
-            if self.rect.colliderect(tile.rect):
-                if self.speedx > 0 and self.rect.right > tile.rect.left and self.rect.left < tile.rect.left:
+            if self.rect.colliderect(tile.rect) and not tile.broken:
+                if self.speedx > 0 and self.rect.right >= tile.rect.left:
                     self.rect.right = tile.rect.left
                     self.speedx = 0
-                elif self.speedx < 0 and self.rect.left < tile.rect.right and self.rect.right > tile.rect.right:
+                elif self.speedx < 0 and self.rect.left <= tile.rect.right:
                     self.rect.left = tile.rect.right
                     self.speedx = 0
 
@@ -470,7 +485,7 @@ class Player:
         self.on_ground = False
         title_ground.check_collision(self)
         for tile in tiles:
-            if self.rect.colliderect(tile.rect):
+            if self.rect.colliderect(tile.rect) and not tile.broken:
                 if self.speedy > 0 and self.rect.bottom >= tile.rect.top:
                     self.rect.bottom = tile.rect.top
                     self.speedy = 0
@@ -629,6 +644,7 @@ intro_players = [Player(
     x=centerx - player_dist / 2 + player_dist * i,
     y=SCREEN_HEIGHT,
     character=character,
+    controls_enabled=False,
     size=1,
     **properties)
     for i, (character, properties) in enumerate(
@@ -877,6 +893,9 @@ while running:
             bgm_player.play_music("title")
             fade_out = True
             title = False
+            for player in intro_players:
+                player.speedx = 2
+                player.walk_cutscene = True
 
     fade_surface.fill((0, 0, 0, a))
     screen.blit(fade_surface, (0, 0))
