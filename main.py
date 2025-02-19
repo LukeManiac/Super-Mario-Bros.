@@ -4,7 +4,6 @@ import math
 
 pygame.init()
 pygame.font.init()
-pygame.joystick.init()
 pygame.mixer.init()
 
 main_directory = dirname(abspath(__file__))
@@ -377,7 +376,7 @@ class Player:
         self.left = False
         self.right = False
         self.down = False
-        self.crouch = False
+        self.down = False
         self.jump = False
         self.walk_frames = walk_frames
         self.run_frames = run_frames
@@ -415,7 +414,7 @@ class Player:
 
     def update_hitbox(self):
         prev_bottom = self.rect.bottom
-        new_width, new_height = (16, 16 if self.size == 0 else 32) if not self.crouch else (16, 8 if self.size == 0 else 16)
+        new_width, new_height = (16, 16 if self.size == 0 else 32) if not self.down else (16, 8 if self.size == 0 else 16)
         self.rect.width, self.rect.height = new_width, new_height
         self.rect.bottom = prev_bottom
 
@@ -423,9 +422,10 @@ class Player:
         if self.controls_enabled:
             self.left = keys[self.controls["left"]]
             self.right = keys[self.controls["right"]]
+            self.up = keys[self.controls["up"]]
+            self.down = keys[self.controls["down"]] if self.on_ground else self.down
             self.run = keys[self.controls["run"]]
             self.jump = keys[self.controls["jump"]]
-            self.crouch = keys[self.controls["down"]] if self.on_ground else self.crouch
             self.speed = RUN_SPEED if self.run else WALK_SPEED
 
         self.update_hitbox()
@@ -505,13 +505,13 @@ class Player:
         self.rect.x = range_number(camera.x + SCREEN_WIDTH - self.rect.width, camera.x, self.rect.x)
         self.rect.y = range_number(camera.y + SCREEN_HEIGHT - self.rect.height, camera.y, self.rect.y)
 
-        self.skidding = (self.fall_timer < self.fall_duration and ((self.speedx < 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)) and not self.crouch)
+        self.skidding = (self.fall_timer < self.fall_duration and ((self.speedx < 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)) and not self.down)
 
         if self.on_ground:
             self.speedy = 0
             self.fall_timer = 0
             self.falling = True
-            if self.crouch:
+            if self.down:
                 self.speedx *= (1 - self.acceleration)
         else:
             self.speedy += self.gravity
@@ -520,7 +520,7 @@ class Player:
                 self.falling = True
                 self.fall_timer = 0
 
-        if self.crouch:
+        if self.down:
             self.anim_state = (3 if self.fall_timer >= self.fall_duration else 2) + (8 + self.walk_frames + self.run_frames if self.carrying_item else 0)
         elif self.skidding:
             self.anim_state = (12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames if self.carrying_item else 4 + self.walk_frames
@@ -528,9 +528,9 @@ class Player:
                 self.frame_timer += abs(self.speedx) / 1.25
         elif self.speedy < 0:
             self.anim_state = ((12 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0)) if self.carrying_item else (7 + self.run_frames if self.pspeed else 5)) + self.walk_frames
-        elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.crouch):
+        elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.down):
             self.anim_state = ((13 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0)) if self.carrying_item else (8 + self.run_frames if self.pspeed else 6)) + self.walk_frames
-        elif self.speedx == 0 and self.on_ground and not self.crouch:
+        elif self.speedx == 0 and self.on_ground and not self.down:
             self.anim_state = (9 + self.walk_frames + self.run_frames) if self.carrying_item else 1
             self.speedx = 0
         elif abs(self.speedx) > 0 and self.fall_timer < self.fall_duration and (not self.pspeed or self.carrying_item):
@@ -644,7 +644,7 @@ intro_players = [Player(
     x=centerx - player_dist / 2 + player_dist * i,
     y=SCREEN_HEIGHT,
     character=character,
-    controls_enabled=False,
+    controls_enabled=True,
     size=1,
     **properties)
     for i, (character, properties) in enumerate(
@@ -696,7 +696,6 @@ game_ready = False
 exit_ready = False
 
 if pygame.joystick.get_count() > 0:
-    pygame.joystick.init()
     joysticks = [pygame.joystick.Joystick(i) for i in range(pygame.joystick.get_count())]
     for joystick in joysticks:
         joystick.init()
@@ -893,9 +892,6 @@ while running:
             bgm_player.play_music("title")
             fade_out = True
             title = False
-            for player in intro_players:
-                player.speedx = 2
-                player.walk_cutscene = True
 
     fade_surface.fill((0, 0, 0, a))
     screen.blit(fade_surface, (0, 0))
@@ -911,6 +907,8 @@ while running:
             title = False
             fade_in = False
             fade_out = False
+            binding_key = False
+            current_bind = False
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_RETURN and event.mod & pygame.KMOD_ALT:
                 fullscreen = not fullscreen
@@ -997,28 +995,7 @@ while running:
                             current_bind = bind_table[selected_menu_index]
                             sound_player.play_sound(sprout_sound)
                             sound_player.stop_sound(powerup_sound)
-    
-        elif event.type == pygame.JOYBUTTONDOWN and binding_key:
-            joystick = joysticks[event.joy]
-            if binding_key:
-                if current_bind:
-                    if current_bind in controls_table[event.joy]:
-                        controls_table[event.joy][bind_table[selected_menu_index]] = joystick.get_button(event.button)
-                binding_key = False
-                current_bind = False
-                sound_player.play_sound(powerup_sound)
-                sound_player.stop_sound(sprout_sound)
 
-        elif event.type == pygame.JOYAXISMOTION and binding_key:
-            joystick = joysticks[event.joy]
-            if abs(joystick.get_axis(0)) > deadzone:
-                controls_table[event.joy][bind_table[selected_menu_index]] = event.axis
-            else:
-                binding_key = False
-                current_bind = False
-                sound_player.play_sound(powerup_sound)
-                sound_player.stop_sound(sprout_sound)
-    
     bgm_player.update()
     pygame.display.flip()
     clock.tick(FPS)
@@ -1037,4 +1014,4 @@ with open(f"{main_directory}/settings.json", "w") as settings:
             "deadzone": deadzone,
             "fullscreen": fullscreen
         }, settings, indent=4
-    )
+        )
