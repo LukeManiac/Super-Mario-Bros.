@@ -11,7 +11,8 @@ This is a Python-based recreation of the classic **Super Mario Bros.** game by L
 - **Multiplayer Support**: Support for up to 4 players.
 - **Event System**: Manage user input and events from both keyboard and gamepad.
 - **Fade Effects**: Transition effects for a smoother experience.
-- **Settings Persistence**: Save settings like volume, controls, and other preferences.
+- **Settings Persistence**: Save settings like volume, controls and other preferences.
+- **Nitpicks**: Modify graphics, mechanics and many stuff.
 
 ## Installation
 
