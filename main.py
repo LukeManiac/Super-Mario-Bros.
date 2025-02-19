@@ -285,9 +285,9 @@ class PowerMeter:
             screen.blit(sprite, (draw_x, draw_y))
 
 class Tile:
-    def __init__(self, x, y, image, spriteset=1):
-        self.x = x
-        self.y = y
+    def __init__(self, x, y, image, spriteset, left_collide, right_collide, top_collide, bottom_collide, bonk_bounce):
+        self.x = x // 16
+        self.y = y // 16
         self.spriteset = spriteset - 1
         self.image = load_sprite(image)
         self.img_width, self.img_height = self.image.get_size()
@@ -297,36 +297,87 @@ class Tile:
         self.rows = self.img_height // self.tile_size
         self.sprites = [pygame.Rect(0, row * self.tile_size, 16, self.tile_size) for row in range(self.rows)]
 
+        self.left_collide = left_collide
+        self.right_collide = right_collide
+        self.top_collide = top_collide
+        self.bottom_collide = bottom_collide
+        self.bonk_bounce = bonk_bounce
+        
+        self.bouncing = False
+        self.bounce_timer = 0
+        self.bounce_speed = 0
+        self.y_offset = 0
+
+    def check_collision(self, player):
+        if self.rect.colliderect(player.rect):
+            dx_left = player.rect.right - self.rect.left
+            dx_right = self.rect.right - player.rect.left
+            dy_top = player.rect.bottom - self.rect.top
+            dy_bottom = self.rect.bottom - player.rect.top
+
+            min_dx, min_dy = min(dx_left, dx_right), min(dy_top, dy_bottom)
+
+            if min_dx < min_dy:
+                if dx_left < dx_right and self.left_collide:
+                    player.rect.right = self.rect.left
+                    player.speedx = 0
+                elif dx_right < dx_left and self.right_collide:
+                    player.rect.left = self.rect.right
+                    player.speedx = 0
+            else:
+                if dy_top < dy_bottom and self.top_collide:
+                    player.rect.bottom = self.rect.top
+                    player.speedy = 0
+                    player.on_ground = True
+                elif dy_bottom < dy_top and self.bottom_collide:
+                    player.rect.top = self.rect.bottom
+                    player.speedy = 0
+                    sound_player.play_sound(bump_sound)
+
+                    if self.bonk_bounce:
+                        self.bouncing = True
+                        self.bounce_speed = -2
+                        self.y_offset = 0
+
+    def update(self):
+        if self.bouncing:
+            self.y_offset += self.bounce_speed
+            self.bounce_speed += 0.25
+
+            if self.y_offset >= 0:
+                self.y_offset = 0
+                self.bouncing = False
+
     def draw(self):
         if 0 <= self.spriteset < self.rows:
-            screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y))
+            screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y + self.y_offset))
 
-class AnimatedTile:
-    def __init__(self, x, y, image, spriteset=1):
-        self.x = x
-        self.y = y
-        self.spriteset = spriteset - 1
-
-        self.image = load_sprite(image)
-        self.img_width, self.img_height = self.image.get_size()
-
-        self.tile_size = 16
-        self.rect = pygame.Rect(x, y, self.tile_size, self.tile_size)
+class AnimatedTile(Tile):
+    def __init__(self, x, y, image, spriteset, left_collide, right_collide, top_collide, bottom_collide, bonk_bounce):
+        super().__init__(x, y, image, spriteset, left_collide, right_collide, top_collide, bottom_collide, bonk_bounce)
 
         self.cols = self.img_width // self.tile_size
-        self.rows = self.img_height // self.tile_size
-
-        self.sprites = [[pygame.Rect(col * self.tile_size, row * self.tile_size, self.tile_size, self.tile_size) for col in range(self.cols)] for row in range(self.rows)]
-
         self.total_frames = self.cols
         self.frame_index = 0
 
+        self.sprites = [
+            [pygame.Rect(col * self.tile_size, row * self.tile_size, self.tile_size, self.tile_size) for col in range(self.cols)]
+            for row in range(self.rows)
+        ]
+
     def update(self):
-        self.frame_index = int(dt / (FPS / self.cols)) % self.total_frames
+        super().update()
+        self.frame_index = int((dt / (FPS / self.cols)) % self.total_frames)
 
     def draw(self):
         if 0 <= self.spriteset < self.rows and 0 <= self.frame_index < self.cols:
-            screen.blit(self.image.subsurface(self.sprites[self.spriteset][self.frame_index]), (self.x - camera.x, self.y - camera.y))
+            screen.blit(
+                self.image.subsurface(self.sprites[self.spriteset][self.frame_index]),
+                (self.x - camera.x, self.y - camera.y),
+            )
+
+    def check_collision(self, player):
+        super().check_collision(player)
 
 class Brick(AnimatedTile):
     def __init__(self, x, y, spriteset=1):
@@ -388,7 +439,7 @@ class Player:
         self.rect.width, self.rect.height = new_width, new_height
         self.rect.bottom = prev_bottom
 
-    def update(self, ground):
+    def update(self):
         if self.controls_enabled:
             self.left = keys[self.controls["left"]]
             self.right = keys[self.controls["right"]]
@@ -445,6 +496,9 @@ class Player:
 
         new_x = self.rect.x + self.speedx
         self.rect.x = new_x
+        
+        for tile in tiles:
+            tile.check_collision(self)
 
         if new_x < camera.x and self.speedx < 0:
             self.speedx = 0
@@ -458,7 +512,11 @@ class Player:
         self.rect.x = range_number(camera.x + SCREEN_WIDTH - self.rect.width, camera.x, self.rect.x)
         self.rect.y = range_number(camera.y + SCREEN_HEIGHT - self.rect.height, camera.y, self.rect.y)
         
-        ground.check_collision(self)
+        self.on_ground = False
+        title_ground.check_collision(self)
+        for tile in tiles:
+            tile.check_collision(self)
+        
         if self.on_ground:
             self.speedy = 0
             if self.crouch:
@@ -584,7 +642,6 @@ intro_players = [Player(
     x=centerx - player_dist / 2 + player_dist * i,
     y=SCREEN_HEIGHT,
     character=character,
-    controls_enabled=False,
     size=1,
     **properties)
     for i, (character, properties) in enumerate(
@@ -601,6 +658,7 @@ bgm_player = BGMPlayer()
 sound_player = SFXPlayer()
 title_ground = TitleGround()
 background_manager = Background()
+tiles = [Tile(500, 300, "ground")]
 beep_sound = load_sound("beep")
 bump_sound = load_sound("bump")
 coin_sound = load_sound("coin")
@@ -632,6 +690,7 @@ bind_table = ["up", "down", "left", "right", "run", "jump", "pause"]
 binding_key = False
 current_bind = False
 game_ready = False
+exit_ready = False
 
 if pygame.joystick.get_count() > 0:
     pygame.joystick.init()
@@ -679,6 +738,12 @@ while running:
         if a >= 255:
             a = 255
             fade_in = False
+            if exit_ready:
+                running = False
+                menu = False
+                title = False
+                fade_in = False
+                fade_out = False
 
     elif fade_out:
         fade_in = False
@@ -762,10 +827,14 @@ while running:
         camera.update(intro_players, False, 15)
         
         title_ground.draw()
+
+        for tile in tiles:
+            tile.draw()
+            tile.update()
         
         for player in intro_players:
             player.draw()
-            player.update(title_ground)
+            player.update()
 
         if menu_options == title_screen[0]:
             for i in range(len(menu_options)):
@@ -812,7 +881,7 @@ while running:
                     stickxtocamera=True
                 )
 
-        if game_ready:
+        if game_ready or exit_ready:
             logo.draw()
             logo.update()
         
@@ -820,27 +889,11 @@ while running:
             bgm_player.play_music("title")
             fade_out = True
             title = False
-            for player in intro_players:
-                player.speedx = 2
-                player.walk_cutscene = True
 
-    create_text(
-        text="press ctrl+shift+n to".upper(),
-        position=(centerx, centery / 20),
-        alignment="center",
-        stickxtocamera=True
-    )
-    create_text(
-        text="generate nitpicks file".upper(),
-        position=(centerx, centery / 8),
-        alignment="center",
-        stickxtocamera=True
-    )
-            
     fade_surface.fill((0, 0, 0, a))
     screen.blit(fade_surface, (0, 0))
 
-    if not game_ready:
+    if nor(game_ready, exit_ready):
         logo.draw()
         logo.update()
         
@@ -905,11 +958,10 @@ while running:
                             menu_area = 2
                             sound_player.play_sound(coin_sound)
                         elif selected_menu_index == 5:
-                            running = False
-                            menu = False
-                            title = False
-                            fade_in = False
-                            fade_out = False
+                            fade_in = True
+                            exit_ready = True
+                            bgm_player.stop_music()
+                            sound_player.play_sound(coin_sound)
                         else:
                             fade_in = True
                             game_ready = True
