@@ -189,11 +189,11 @@ class Camera:
     def update(self, players, max_x, max_y):
         self.x = range_number(
             sum(player.rect.x + player.rect.width + player.speedx for player in players) / len(players) - SCREEN_WIDTH // 2,
-            0, (max_x if max_x else float('inf'))
+            0, (max_x if max_x else infinity)
         )
         self.y = range_number(
             sum(player.rect.y + player.rect.height + player.speedy for player in players) / len(players) - SCREEN_HEIGHT // 2,
-            0, (max_y if max_y else float('inf'))
+            0, (max_y if max_y else infinity)
         )
 
 class Logo:
@@ -467,6 +467,21 @@ class Player:
         elif not self.jump:
             self.jump_timer = 1 if self.fall_timer < self.fall_duration else 0
 
+        if self.rect.left <= camera.x:
+            self.rect.left = camera.x
+            if self.speedx <= camera.x - (self.rect.left - self.speedx) and not self.right:
+                self.speedx = 0
+
+        if self.rect.right >= camera.x + SCREEN_WIDTH:
+            self.rect.right = camera.x + SCREEN_WIDTH
+            if self.speedx >= camera.x + SCREEN_WIDTH - (self.rect.right - self.speedx) and not self.left:
+                self.speedx = 0
+
+        if self.rect.top < camera.y:
+            self.rect.top = camera.y
+            self.speedy = 0
+            self.jump_timer = 0
+
         self.pspeed = self.run_timer >= MAX_RUN_TIMER
 
         self.run_timer = range_number(self.run_timer + 1 if abs(self.speedx) == RUN_SPEED else self.run_timer - 1, MIN_RUN_TIMER, MAX_RUN_TIMER) if self.fall_timer < self.fall_duration and self.controls_enabled else max(self.run_timer - 1, MIN_RUN_TIMER)
@@ -644,7 +659,7 @@ intro_players = [Player(
     x=centerx - player_dist / 2 + player_dist * i,
     y=SCREEN_HEIGHT,
     character=character,
-    controls_enabled=True,
+    controls_enabled=False,
     size=1,
     **properties)
     for i, (character, properties) in enumerate(
@@ -892,6 +907,9 @@ while running:
             bgm_player.play_music("title")
             fade_out = True
             title = False
+            for player in intro_players:
+                player.speedx = 2
+                player.walk_cutscene = True
 
     fade_surface.fill((0, 0, 0, a))
     screen.blit(fade_surface, (0, 0))
@@ -1014,4 +1032,4 @@ with open(f"{main_directory}/settings.json", "w") as settings:
             "deadzone": deadzone,
             "fullscreen": fullscreen
         }, settings, indent=4
-        )
+    )
