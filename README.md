@@ -20,6 +20,14 @@ To run the game, you need the following dependencies:
 - Python 3.x
 - Pygame library
 
+## Issues
+Unfortunately, controller support is not fully working in pygame so you'll need some kind of tools to convert joystick buttons to keyboard buttons like the following:
+- [AntiMicro](https://github.com/AntiMicro/antimicro)
+- [JoyToKey](https://joytokey.net/en/)
+- [Xpadder](https://www.xpadder.com/)
+- [InputMapper](https://inputmapper.com/)
+- [ReWASD](https://www.rewasd.com/)
+
 ## Controls (can change anytime)
 ### Player 1:
 - **Up:** Up
