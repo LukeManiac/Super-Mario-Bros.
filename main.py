@@ -230,10 +230,10 @@ class TitleGround:
         self.y = SCREEN_HEIGHT - 8
         self.sprite = load_sprite("ground")
 
-    def check_collision(self, mario):
-        mario.on_ground = mario.rect.bottom >= self.y
-        if mario.rect.bottom >= self.y:
-            mario.rect.bottom = self.y
+    def check_collision(self, player):
+        player.on_ground = player.rect.bottom >= self.y
+        if player.rect.bottom >= self.y:
+            player.rect.bottom = self.y
 
     def draw(self):
         offset_x = -camera.x % 16
@@ -292,7 +292,7 @@ class Tile:
         self.image = load_sprite(image)
         self.img_width, self.img_height = self.image.get_size()
         self.tile_size = 16
-        self.rect = pygame.Rect(x, y, 16, self.tile_size)
+        self.rect = pygame.Rect(x * 16, y * 16, 16, self.tile_size)
         self.cols = 1
         self.rows = self.img_height // self.tile_size
         self.sprites = [pygame.Rect(0, row * self.tile_size, 16, self.tile_size) for row in range(self.rows)]
@@ -308,37 +308,6 @@ class Tile:
         self.bounce_speed = 0
         self.y_offset = 0
 
-    def check_collision(self, player):
-        if self.rect.colliderect(player.rect):
-            dx_left = player.rect.right - self.rect.left
-            dx_right = self.rect.right - player.rect.left
-            dy_top = player.rect.bottom - self.rect.top
-            dy_bottom = self.rect.bottom - player.rect.top
-
-            min_dx, min_dy = min(dx_left, dx_right), min(dy_top, dy_bottom)
-
-            if min_dx < min_dy:
-                if dx_left < dx_right and self.left_collide:
-                    player.rect.right = self.rect.left
-                    player.speedx = 0
-                elif dx_right < dx_left and self.right_collide:
-                    player.rect.left = self.rect.right
-                    player.speedx = 0
-            else:
-                if dy_top < dy_bottom and self.top_collide:
-                    player.rect.bottom = self.rect.top
-                    player.speedy = 0
-                    player.on_ground = True
-                elif dy_bottom < dy_top and self.bottom_collide:
-                    player.rect.top = self.rect.bottom
-                    player.speedy = 0
-                    sound_player.play_sound(bump_sound)
-
-                    if self.bonk_bounce:
-                        self.bouncing = True
-                        self.bounce_speed = -2
-                        self.y_offset = 0
-
     def update(self):
         if self.bouncing:
             self.y_offset += self.bounce_speed
@@ -350,7 +319,7 @@ class Tile:
 
     def draw(self):
         if 0 <= self.spriteset < self.rows:
-            screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y + self.y_offset))
+            screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y + (self.y_offset * (-1 if nitpicks["inverted_block_bounce"] else 1))))
 
 class AnimatedTile(Tile):
     def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False):
@@ -371,13 +340,7 @@ class AnimatedTile(Tile):
 
     def draw(self):
         if 0 <= self.spriteset < self.rows and 0 <= self.frame_index < self.cols:
-            screen.blit(
-                self.image.subsurface(self.sprites[self.spriteset][self.frame_index]),
-                (self.x - camera.x, self.y - camera.y),
-            )
-
-    def check_collision(self, player):
-        super().check_collision(player)
+            screen.blit(self.image.subsurface(self.sprites[self.spriteset][self.frame_index]), (self.x - camera.x, self.y - camera.y + (self.y_offset * (-1 if nitpicks["inverted_block_bounce"] else 1))))
 
 class Brick(AnimatedTile):
     def __init__(self, x, y, spriteset=1):
@@ -390,6 +353,7 @@ class Player:
         self.character = character
         self.speedx = 0
         self.speedy = 0
+        self.jump_speedx = 0
         self.frame_timer = 0
         self.on_ground = False
         self.facing_right = True
@@ -430,12 +394,13 @@ class Player:
             "bluetoad": controls4
         }
         self.controls = self.controls_table[character]
+        self.fall_timer = 0
+        self.fall_duration = math.pi / 20
+        self.falling = True
 
     def update_hitbox(self):
         prev_bottom = self.rect.bottom
-
         new_width, new_height = (16, 16 if self.size == 0 else 32) if not self.crouch else (16, 8 if self.size == 0 else 16)
-
         self.rect.width, self.rect.height = new_width, new_height
         self.rect.bottom = prev_bottom
 
@@ -450,7 +415,7 @@ class Player:
 
         self.update_hitbox()
 
-        if self.on_ground and not self.walk_cutscene:
+        if self.on_ground:
             if self.left and not self.right:
                 self.speedx = max(self.speedx - self.acceleration, -self.speed)
                 self.facing_right = False if self.on_ground else self.facing_right
@@ -458,114 +423,112 @@ class Player:
                 self.speedx = min(self.speedx + self.acceleration, self.speed)
                 self.facing_right = True if self.on_ground else self.facing_right
             else:
-                if abs(self.speedx) <= MIN_SPEEDX:
-                    self.speedx = 0
-                else:
+                if not self.walk_cutscene:
                     self.speedx *= (1 - self.acceleration)
+                if abs(self.speedx) < MIN_SPEEDX:
+                    self.speedx = 0
         else:
             if self.left and not self.right:
-                if self.speedx > 0:  
-                    self.speedx -= self.acceleration
-                self.speedx = max(self.speedx - self.acceleration, -self.speed)  
+                self.speedx = max(self.speedx - self.acceleration, -self.speed)
             elif self.right and not self.left:
-                if self.speedx < 0:  
-                    self.speedx += self.acceleration  
                 self.speedx = min(self.speedx + self.acceleration, self.speed)
+            else:
+                if not self.walk_cutscene:
+                    self.speedx *= (1 - self.acceleration)
+                if abs(self.speedx) < MIN_SPEEDX:
+                    self.speedx = 0
 
-        if self.on_ground and self.jump_timer == 0 and self.jump and not self.jump:
+        if self.fall_timer < self.fall_duration and self.jump and not self.jump and self.jump_timer == 0:
             self.speedy = -self.min_jump
             self.jump_timer = 1
-        elif self.jump and self.jump_timer > 0 and self.jump_timer < JUMP_HOLD_TIME:
-            if self.jump_timer <= 1:
+        elif self.jump and 0 < self.jump_timer < JUMP_HOLD_TIME:
+            if self.jump_timer == 1:
                 sound_player.play_sound(jump_sound if self.size == 0 else jumpbig_sound)
-            self.speedy = max(self.speedy - self.max_jump, -self.max_jump)
+                self.fall_timer = self.fall_duration
+                self.jump_speedx = abs(self.speedx)
+            self.max_speedx_jump = (self.max_jump + 1) if self.jump_speedx >= 1 else self.max_jump
+            self.speedy = max(self.speedy - self.max_speedx_jump, -self.max_speedx_jump)
             self.jump_timer += 1
         elif not self.jump:
-            self.jump_timer = 1 if self.on_ground else 0
+            self.jump_timer = 1 if self.fall_timer < self.fall_duration else 0
 
-        self.speedx = range_number(self.speedx, -RUN_SPEED, RUN_SPEED)
-        self.speedy += self.gravity
-        self.skidding = self.on_ground and ((self.speedx < 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)) and not self.crouch
         self.pspeed = self.run_timer >= MAX_RUN_TIMER
 
-        if self.on_ground and self.controls_enabled:
-            self.run_timer = MAX_RUN_TIMER if nitpicks["always_pspeed"] else range_number(self.run_timer + 1 if abs(self.speedx) == RUN_SPEED else self.run_timer - 1, MIN_RUN_TIMER, MAX_RUN_TIMER)
-        else:
-            if not self.pspeed:
-                self.run_timer = max(self.run_timer - 1, MIN_RUN_TIMER)
+        self.run_timer = range_number(self.run_timer + 1 if abs(self.speedx) == RUN_SPEED else self.run_timer - 1, MIN_RUN_TIMER, MAX_RUN_TIMER) if self.fall_timer < self.fall_duration and self.controls_enabled else max(self.run_timer - 1, MIN_RUN_TIMER)
 
-        new_x = self.rect.x + self.speedx
-        self.rect.x = new_x
-
-        if tiles:
-            for tile in tiles:
-                tile.check_collision(self)
-
-        if self.rect.x < camera.x:
-            self.rect.x = camera.x
-            self.speedx = 0
-        elif self.rect.x + self.rect.width > camera.x + SCREEN_WIDTH:
-            self.rect.x = camera.x + SCREEN_WIDTH - self.rect.width
-            self.speedx = 0
-
-        if self.rect.y < camera.y:
-            self.rect.y = camera.y
-            self.speedy = 0
-        elif self.rect.y + self.rect.height > camera.y + SCREEN_HEIGHT:
-            self.rect.y = camera.y + SCREEN_HEIGHT - self.rect.height
-            self.speedy = 0
-            self.on_ground = True
-
-        if self.crouch and self.on_ground:
-            self.speedx *= (1 - self.acceleration)
+        self.rect.x += self.speedx
+        for tile in tiles:
+            if self.rect.colliderect(tile.rect):
+                if self.speedx > 0 and self.rect.right > tile.rect.left and self.rect.left < tile.rect.left:
+                    self.rect.right = tile.rect.left
+                    self.speedx = 0
+                elif self.speedx < 0 and self.rect.left < tile.rect.right and self.rect.right > tile.rect.right:
+                    self.rect.left = tile.rect.right
+                    self.speedx = 0
 
         self.rect.y += self.speedy
-        self.rect.x = range_number(camera.x + SCREEN_WIDTH - self.rect.width, camera.x, self.rect.x)
-        self.rect.y = range_number(camera.y + SCREEN_HEIGHT - self.rect.height, camera.y, self.rect.y)
-        
         self.on_ground = False
         title_ground.check_collision(self)
+        for tile in tiles:
+            if self.rect.colliderect(tile.rect):
+                if self.speedy > 0 and self.rect.bottom >= tile.rect.top:
+                    self.rect.bottom = tile.rect.top
+                    self.speedy = 0
+                    self.on_ground = True
+                    self.falling = False
+                    self.fall_timer = 0
+                elif self.speedy < 0 and self.rect.top <= tile.rect.bottom:
+                    self.rect.top = tile.rect.bottom
+                    self.jump_timer = 0
+                    self.speedy = 0
+                    sound_player.play_sound(bump_sound)
+                    if tile.bonk_bounce:
+                        tile.bouncing = True
+                        tile.bounce_speed = -2
+                        tile.y_offset = 0
 
-        if tiles:
-            for tile in tiles:
-                tile.check_collision(self)
-        
+        self.rect.x = range_number(camera.x + SCREEN_WIDTH - self.rect.width, camera.x, self.rect.x)
+        self.rect.y = range_number(camera.y + SCREEN_HEIGHT - self.rect.height, camera.y, self.rect.y)
+
+        self.skidding = (self.fall_timer < self.fall_duration and ((self.speedx < 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)) and not self.crouch)
+
         if self.on_ground:
             self.speedy = 0
+            self.fall_timer = 0
+            self.falling = True
             if self.crouch:
-                if self.speedx > 0:
-                    self.speedx -= self.acceleration
-                elif self.speedx < 0:
-                    self.speedx += self.acceleration
+                self.speedx *= (1 - self.acceleration)
+        else:
+            self.speedy += self.gravity
+            self.fall_timer += 0.025
+            if not self.falling:
+                self.falling = True
+                self.fall_timer = 0
 
         if self.crouch:
-            self.anim_state = (3 if self.speedy > 0 else 2) + (8 + self.walk_frames + self.run_frames if self.carrying_item else 0)
+            self.anim_state = (3 if self.fall_timer >= self.fall_duration else 2) + (8 + self.walk_frames + self.run_frames if self.carrying_item else 0)
         elif self.skidding:
+            self.anim_state = (12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames if self.carrying_item else 4 + self.walk_frames
             if self.carrying_item:
                 self.frame_timer += abs(self.speedx) / 1.25
-                self.anim_state = (12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames
-            else:
-                self.anim_state = 4 + self.walk_frames
         elif self.speedy < 0:
             self.anim_state = ((12 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0)) if self.carrying_item else (7 + self.run_frames if self.pspeed else 5)) + self.walk_frames
-        elif self.speedy >= 0 and nor(self.on_ground, self.crouch):
+        elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.crouch):
             self.anim_state = ((13 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0)) if self.carrying_item else (8 + self.run_frames if self.pspeed else 6)) + self.walk_frames
         elif self.speedx == 0 and self.on_ground and not self.crouch:
             self.anim_state = (9 + self.walk_frames + self.run_frames) if self.carrying_item else 1
             self.speedx = 0
-        elif abs(self.speedx) > 0 and self.on_ground and not self.pspeed or self.carrying_item:
+        elif abs(self.speedx) > 0 and self.fall_timer < self.fall_duration and (not self.pspeed or self.carrying_item):
             self.frame_timer += abs(self.speedx) / 1.25
             self.anim_state = (12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames
-        elif self.pspeed and self.on_ground and not self.carrying_item:
+        elif self.pspeed and self.fall_timer < self.fall_duration and not self.carrying_item:
             self.frame_timer += abs(self.speedx) / 1.25
             self.anim_state = 7 + self.walk_frames + int(self.frame_timer // FRAME_SPEED) % self.run_frames
 
     def draw(self):
         sprite = self.spritesheet.subsurface(self.sprites[self.size][self.anim_state - 1])
         sprite = pygame.transform.flip(sprite, (not self.facing_right) ^ nitpicks["moonwalking_mario"], nitpicks["upside_down_mario"])
-
-        draw_x = self.rect.x - camera.x + (((1 if self.character == "mario" else 2 if self.character == "luigi" else 0) if self.anim_state == 7 + self.run_frames + self.walk_frames or self.anim_state == 8 + self.run_frames + self.walk_frames or self.anim_state == 14 + self.run_frames + self.walk_frames * 2 or self.anim_state == 15 + self.run_frames + self.walk_frames * 2 else 0) * (1 if (not self.facing_right) ^ nitpicks["moonwalking_mario"] else -1))
-
+        draw_x = self.rect.x - camera.x - 2 + (((1 if self.character == "mario" else 2 if self.character == "luigi" else 0) if self.anim_state == 7 + self.run_frames + self.walk_frames or self.anim_state == 8 + self.run_frames + self.walk_frames or self.anim_state == 14 + self.run_frames + self.walk_frames * 2 or self.anim_state == 15 + self.run_frames + self.walk_frames * 2 else 0) * (1 if (not self.facing_right) ^ nitpicks["moonwalking_mario"] else -1))
         draw_y = self.rect.y - camera.y + self.rect.height - 33
         screen.blit(sprite, (draw_x, draw_y))
 
@@ -622,17 +585,28 @@ if exists(f"{main_directory}/settings.json") and not getsize(f"{main_directory}/
         deadzone = data.get("deadzone", deadzone)
         fullscreen = data.get("fullscreen", fullscreen)
 
-if not exists(f"{main_directory}/nitpicks.json"):
+nitpicks_list = [
+    "upside_down_mario",
+    "upside_down_enemies",
+    "moonwalking_mario",
+    "moonwalking_enemies",
+    "always_pspeed",
+    "inverted_block_bounce"
+]
+
+if exists(f"{main_directory}/nitpicks.json"):
+    with open(f"{main_directory}/nitpicks.json", "r") as nitpicks:
+        data = json.load(nitpicks)
+        
+    for key in nitpicks_list:
+        if key not in data:
+            data[key] = False
+    
     with open(f"{main_directory}/nitpicks.json", "w") as nitpicks:
-        json.dump(
-            {
-                "upside_down_mario": False,
-                "upside_down_enemies": False,
-                "moonwalking_mario": False,
-                "moonwalking_enemies": False,
-                "always_pspeed": False
-            }, nitpicks, indent=4
-        )
+        json.dump(data, nitpicks, indent=4)
+else:
+    with open(f"{main_directory}/nitpicks.json", "w") as nitpicks:
+        json.dump({key: False for key in nitpicks_list}, nitpicks, indent=4)
 
 with open(f"{main_directory}/nitpicks.json", "r") as file:
     nitpicks = json.load(file)
