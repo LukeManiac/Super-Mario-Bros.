@@ -285,9 +285,9 @@ class PowerMeter:
             screen.blit(sprite, (draw_x, draw_y))
 
 class Tile:
-    def __init__(self, x, y, image, spriteset, left_collide, right_collide, top_collide, bottom_collide, bonk_bounce):
-        self.x = x // 16
-        self.y = y // 16
+    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False):
+        self.x = x * 16
+        self.y = y * 16
         self.spriteset = spriteset - 1
         self.image = load_sprite(image)
         self.img_width, self.img_height = self.image.get_size()
@@ -353,7 +353,7 @@ class Tile:
             screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y + self.y_offset))
 
 class AnimatedTile(Tile):
-    def __init__(self, x, y, image, spriteset, left_collide, right_collide, top_collide, bottom_collide, bonk_bounce):
+    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False):
         super().__init__(x, y, image, spriteset, left_collide, right_collide, top_collide, bottom_collide, bonk_bounce)
 
         self.cols = self.img_width // self.tile_size
@@ -381,7 +381,7 @@ class AnimatedTile(Tile):
 
 class Brick(AnimatedTile):
     def __init__(self, x, y, spriteset=1):
-        super().__init__(x, y, "brick", spriteset)
+        super().__init__(x, y, "brick", spriteset, bonk_bounce=True)
 
 class Player:
     def __init__(self, x, y, size=0, walk_frames=6, run_frames=3, character="mario", acceleration=0.1, max_jump=4, controls_enabled=True, walk_cutscene=False):
@@ -496,14 +496,25 @@ class Player:
 
         new_x = self.rect.x + self.speedx
         self.rect.x = new_x
-        
-        for tile in tiles:
-            tile.check_collision(self)
 
-        if new_x < camera.x and self.speedx < 0:
+        if tiles:
+            for tile in tiles:
+                tile.check_collision(self)
+
+        if self.rect.x < camera.x:
+            self.rect.x = camera.x
             self.speedx = 0
-        elif new_x + self.rect.width > camera.x + SCREEN_WIDTH and self.speedx > 0:
+        elif self.rect.x + self.rect.width > camera.x + SCREEN_WIDTH:
+            self.rect.x = camera.x + SCREEN_WIDTH - self.rect.width
             self.speedx = 0
+
+        if self.rect.y < camera.y:
+            self.rect.y = camera.y
+            self.speedy = 0
+        elif self.rect.y + self.rect.height > camera.y + SCREEN_HEIGHT:
+            self.rect.y = camera.y + SCREEN_HEIGHT - self.rect.height
+            self.speedy = 0
+            self.on_ground = True
 
         if self.crouch and self.on_ground:
             self.speedx *= (1 - self.acceleration)
@@ -514,8 +525,10 @@ class Player:
         
         self.on_ground = False
         title_ground.check_collision(self)
-        for tile in tiles:
-            tile.check_collision(self)
+
+        if tiles:
+            for tile in tiles:
+                tile.check_collision(self)
         
         if self.on_ground:
             self.speedy = 0
@@ -658,7 +671,7 @@ bgm_player = BGMPlayer()
 sound_player = SFXPlayer()
 title_ground = TitleGround()
 background_manager = Background()
-tiles = [Tile(500, 300, "ground")]
+tiles = []
 beep_sound = load_sound("beep")
 bump_sound = load_sound("bump")
 coin_sound = load_sound("coin")
@@ -828,10 +841,11 @@ while running:
         
         title_ground.draw()
 
-        for tile in tiles:
-            tile.draw()
-            tile.update()
-        
+        if tiles:
+            for tile in tiles:
+                tile.draw()
+                tile.update()
+
         for player in intro_players:
             player.draw()
             player.update()
