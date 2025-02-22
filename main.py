@@ -120,6 +120,23 @@ MIN_RUN_TIMER = 0
 MAX_RUN_TIMER = 75
 FPS = 60
 FRAME_SPEED = 10
+SPROUT_SPEED = 1
+
+beep_sound = load_sound("beep")
+break_sound = load_sound("break")
+bump_sound = load_sound("bump")
+coin_sound = load_sound("coin")
+fireball_sound = load_sound("fireball")
+jump_sound = load_sound("jump")
+jumpbig_sound = load_sound("jumpbig")
+oneup_sound = load_sound("oneup")
+pipe_sound = load_sound("pipe")
+powerup_sound = load_sound("powerup")
+pspeed_sound = load_sound("pspeed")
+shot_sound = load_sound("shot")
+skid_sound = load_sound("skid")
+sprout_sound = load_sound("sprout")
+stomp_sound = load_sound("stomp")
 
 class SFXPlayer:
     def __init__(self):
@@ -175,7 +192,7 @@ class BGMPlayer:
     def update(self):
         if self.music_playing:
             if not pygame.mixer.music.get_busy():
-                pygame.mixer.music.play(-1, self.loop_point)
+                pygame.mixer.music.play(0, self.loop_point)
                 self.music_playing = True
 
 class Background:
@@ -312,9 +329,10 @@ class PowerMeter:
         screen.blit(self.spritesheet.subsurface(self.frames[self.current_frame]), (12, 32 + self.player.player_number * 12))
 
 class Tile:
-    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False, breakable=False):
+    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False, breakable=False, item=None, item_spawn_anim=True, item_sound=sprout_sound):
         self.x = x * 16
         self.y = y * 16 + 8
+        self.og_x, self.og_y = x, y
         self.spriteset = spriteset - 1
         self.image = load_sprite(image)
         self.img_width, self.img_height = self.image.get_size()
@@ -330,6 +348,8 @@ class Tile:
         self.bottom_collide = bottom_collide
         self.bonk_bounce = bonk_bounce
         self.breakable = breakable
+        self.item = item
+        self.item_spawn_anim = item_spawn_anim
 
         self.broken = False
         
@@ -338,9 +358,22 @@ class Tile:
         self.bounce_speed = 0
         self.y_offset = 0
         self.can_break_now = False
+        self.hit = False
+        self.item_spawned = False
+        self.item_sound = item_sound
 
     def update(self):
         if self.bouncing:
+            if self.item is not None:
+                self.bonk_bounce = False
+                self.hit = True
+                self.image = load_sprite("blockhit")
+                self.cols = 1
+                self.frame_index = 0
+                if not self.item_spawned:
+                    items.append(self.item(self.og_x, self.og_y - (0.625 if self.item_spawn_anim else 1), spriteset=self.spriteset, sprout=self.item_spawn_anim))
+                    sound_player.play_sound(self.item_sound)
+                    self.item_spawned = True
             self.y_offset += self.bounce_speed
             self.bounce_speed += 0.25
 
@@ -362,19 +395,22 @@ class Tile:
             debris.append(BrickDebris(self.x, self.y, 1, -5, self.spriteset))
             debris.append(BrickDebris(self.x, self.y, -1, 0, self.spriteset))
             debris.append(BrickDebris(self.x, self.y, 1, 0, self.spriteset))
-            sound_player.play_sound(break_sound)            
+            sound_player.play_sound(break_sound)
 
     def break_block(self):
         self.can_break_now = self.breakable
         self.bouncing = True
 
     def draw(self):
-        if 0 <= self.spriteset < self.rows and not self.broken:
-            screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y + (self.y_offset * (-1 if nitpicks["inverted_block_bounce"] else 1))))
+        if 0 <= self.spriteset < self.rows:
+            if nor(self.broken, self.hit):
+                screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y + (self.y_offset * (-1 if nitpicks["inverted_block_bounce"] else 1))))
+            elif self.hit:
+                screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y + (self.y_offset * (-1 if nitpicks["inverted_block_bounce"] else 1))))
 
 class AnimatedTile(Tile):
-    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False, breakable=False):
-        super().__init__(x, y, image, spriteset, left_collide, right_collide, top_collide, bottom_collide, bonk_bounce, breakable)
+    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False, breakable=False, item=None, item_spawn_anim=True):
+        super().__init__(x, y, image, spriteset, left_collide, right_collide, top_collide, bottom_collide, bonk_bounce, breakable, item, item_spawn_anim)
 
         self.cols = self.img_width // self.tile_size
         self.total_frames = self.cols
@@ -390,12 +426,28 @@ class AnimatedTile(Tile):
         self.frame_index = int((dt / (FPS / self.cols)) % self.total_frames)
 
     def draw(self):
-        if 0 <= self.spriteset < self.rows and 0 <= self.frame_index < self.cols and not self.broken:
-            screen.blit(self.image.subsurface(self.sprites[self.spriteset][self.frame_index]), (self.x - camera.x, self.y - camera.y + (self.y_offset * (-1 if nitpicks["inverted_block_bounce"] else 1))))
+        if 0 <= self.spriteset < self.rows:
+            if nor(self.broken, self.hit):
+                screen.blit(
+                    self.image.subsurface(self.sprites[self.spriteset][self.frame_index]),
+                    (self.x - camera.x, self.y - camera.y + (self.y_offset * (-1 if nitpicks["inverted_block_bounce"] else 1)))
+                )
+            elif self.hit:
+                screen.blit(
+                    self.image.subsurface(self.sprites[0][0]),  # Ensure accessing the correct frame
+                    (self.x - camera.x, self.y - camera.y + (self.y_offset * (-1 if nitpicks["inverted_block_bounce"] else 1)))
+                )
 
 class Brick(AnimatedTile):
-    def __init__(self, x, y, spriteset=1):
-        super().__init__(x, y, "brick", spriteset, bonk_bounce=True, breakable=True)
+    def __init__(self, x, y, item=None, item_spawn_anim=True, spriteset=1):
+        super().__init__(x, y, "brick", spriteset, bonk_bounce=True, breakable=True, item=item, item_spawn_anim=item_spawn_anim)
+
+    def update(self):
+        super().update()
+
+class QuestionBlock(AnimatedTile):
+    def __init__(self, x, y, item=None, item_spawn_anim=True, spriteset=1):
+        super().__init__(x, y, "questionblock", spriteset, bonk_bounce=True, item=item, item_spawn_anim=item_spawn_anim)
 
     def update(self):
         super().update()
@@ -427,50 +479,61 @@ class BrickDebris:
             screen.blit(self.rotated_image, (self.x - camera.x, self.y - camera.y))
 
 class Mushroom:
-    def __init__(self, x, y):
-        self.x, self.y = x * 16, y * 16 + 8
+    def __init__(self, x, y, sprout=False, **kwargs):
+        self.x, self.y = x * 16, y * 16 + 8 + (8 if sprout else 0)
         self.sprite = load_sprite("mushroom")
-        self.speedx = 2
-        self.speedy = 0
+        self.speedx = 0 if sprout else 2
+        self.speedy = -0.5 if sprout else 0
         self.rect = pygame.Rect(self.x, self.y, 16, 16)
         self.gravity = 0.25
         self.size = 1
+        self.sprouting = sprout
+        self.sprout_timer = 0
 
     def update(self):
-        self.x += self.speedx
-        self.rect.topleft = (self.x, self.y)
+        if self.sprouting:
+            self.sprout_timer += 1
+            self.y += self.speedy / 2
 
-        for tile in tiles:
-            if tile.broken:
-                continue
-            if self.rect.colliderect(tile.rect):
-                if self.speedx > 0:
-                    self.x = tile.rect.left - self.rect.width
-                elif self.speedx < 0:
-                    self.x = tile.rect.right
-                self.speedx *= -1
-                break
+            if self.sprout_timer >= SPROUT_SPEED * FPS:
+                self.sprouting = False
+                self.speedx = 2
+                self.speedy = 0
+        else:
+            self.x += self.speedx
+            self.rect.topleft = (self.x, self.y)
 
-        self.y += self.speedy
-        self.speedy += self.gravity
-        self.rect.topleft = (self.x, self.y)
+            for tile in tiles:
+                if tile.broken:
+                    continue
+                if self.rect.colliderect(tile.rect):
+                    if self.speedx > 0:
+                        self.x = tile.rect.left - self.rect.width
+                    elif self.speedx < 0:
+                        self.x = tile.rect.right
+                    self.speedx *= -1
+                    break
 
-        title_ground.check_collision(self)
-        self.rect.topleft = (self.x, self.y)
+            self.y += self.speedy
+            self.speedy += self.gravity
+            self.rect.topleft = (self.x, self.y)
 
-        for tile in tiles:
-            if tile.broken:
-                continue
-            if self.rect.colliderect(tile.rect):
-                if self.speedy > 0:
-                    self.y = tile.rect.top - self.rect.height
-                    self.speedy = -math.pi if tile.bouncing else 0
-                elif self.speedy < 0:
-                    self.y = tile.rect.bottom
-                    self.speedy = 0
-                break
+            title_ground.check_collision(self)
+            self.rect.topleft = (self.x, self.y)
 
-        self.rect.topleft = (self.x, self.y)
+            for tile in tiles:
+                if tile.broken:
+                    continue
+                if self.rect.colliderect(tile.rect):
+                    if self.speedy > 0:
+                        self.y = tile.rect.top - self.rect.height
+                        self.speedy = -math.pi if tile.bouncing else 0
+                    elif self.speedy < 0:
+                        self.y = tile.rect.bottom
+                        self.speedy = 0
+                    break
+
+            self.rect.topleft = (self.x, self.y)
 
     def is_visible(self):
         return (
@@ -484,42 +547,31 @@ class Mushroom:
         screen.blit(self.sprite, (self.x - camera.x, self.y - camera.y))
 
 class FireFlower:
-    def __init__(self, x, y, spriteset=1):
-        self.x, self.y = x * 16, y * 16 + 8
+    def __init__(self, x, y, sprout=False, spriteset=1):
+        self.x, self.y = x * 16, y * 16 + 8 + (8 if sprout else 0)
         self.spriteset = spriteset - 1
         self.sprite = load_sprite("fireflower")
         self.sprites = [[pygame.Rect(i * 16, j * 16, 16, 16) for i in range(4)] for j in range(4)]
         self.speedx = 0
-        self.speedy = 0
+        self.speedy = -0.5 if sprout else 0
         self.rect = pygame.Rect(self.x, self.y, 16, 16)
         self.gravity = 0.25
         self.size = 2
         self.frame_index = 0
+        self.sprouting = sprout
+        self.sprout_timer = 0
 
     def update(self):
-        self.rect.topleft = (self.x, self.y)
+        if self.sprouting:
+            self.sprout_timer += 1
+            self.y += self.speedy
 
-        self.y += self.speedy
-        self.speedy += self.gravity
-        self.rect.topleft = (self.x, self.y)
-
-        title_ground.check_collision(self)
-        self.rect.topleft = (self.x, self.y)
-
-        for tile in tiles:
-            if tile.broken:
-                continue
-            if self.rect.colliderect(tile.rect):
-                if self.speedy > 0:
-                    self.y = tile.rect.top - self.rect.height
-                    self.speedy = -math.pi if tile.bouncing else 0
-                elif self.speedy < 0:
-                    self.y = tile.rect.bottom
-                    self.speedy = 0
-                break
-
-        self.rect.topleft = (self.x, self.y)
-        self.frame_index = int((dt / 4) % 4)
+            if self.sprout_timer >= SPROUT_SPEED * FPS:
+                self.sprouting = False
+                self.speedy = 0
+        else:
+            self.rect.topleft = (self.x, self.y)
+            self.frame_index = int((dt / 4) % 4)
 
     def is_visible(self):
         return (
@@ -538,7 +590,7 @@ class Fireball:
         self.y = player.rect.bottom - player.rect.width
         self.bounce = 2.5
         self.speedx = RUN_SPEED * (1.25 if player.facing_right else -1.25)
-        self.speedy = self.bounce
+        self.speedy = self.bounce * (-1 if player.up else 1)
         self.rect = pygame.Rect(self.x, self.y, 8, 8)
         self.sprite = load_sprite("fireball")
         self.sprites = [[pygame.Rect(i * 16, j * 16, 16, 16) for i in range(4)] for j in range(4)]
@@ -547,7 +599,7 @@ class Fireball:
         self.frame_index = 0
         self.frame_timer = 0
         self.destroyed = False
-        self.gravity = 0.25
+        self.gravity = 0.125
         self.player = player
 
     def update(self):
@@ -757,12 +809,13 @@ class Player:
         self.size = size
         self.walk_cutscene = walk_cutscene
         self.properties = {
-            "mario": [controls, 0.1, 4],
-            "luigi": [controls2, 0.05, 5],
-            "yellowtoad": [controls3, 0.2, 4],
-            "bluetoad": [controls4, 0.25, 4]
+            "mario": [0.1, 4],
+            "luigi": [0.05, 5],
+            "yellowtoad": [0.2, 4],
+            "bluetoad": [0.25, 4]
         }
-        self.controls, self.acceleration, self.max_jump = self.properties[character]
+        self.controls = [controls, controls2, controls3, controls4][player_number - 1]
+        self.acceleration, self.max_jump = self.properties[character]
         self.skidding = False
         self.gravity = 0.25
         self.min_jump = 1
@@ -781,6 +834,7 @@ class Player:
         self.fire_timer = 0
         self.fire_duration = 5
         self.fire_lock = False
+        self.speed = 0
 
     def update_hitbox(self):
         prev_bottom = self.rect.bottom
@@ -795,13 +849,19 @@ class Player:
         self.down = (keys[self.controls["down"]] if self.fall_timer < self.fall_duration else self.down) if self.controls_enabled and self.can_control else False
         self.run = (keys[self.controls["run"]]) if self.controls_enabled and self.can_control else False
         self.jump = (keys[self.controls["jump"]]) if self.controls_enabled and self.can_control else False
-        self.speed = RUN_SPEED if self.run else WALK_SPEED
+        if self.on_ground:
+            self.speed = RUN_SPEED * (1.25 if self.pspeed else 1) if self.run else WALK_SPEED
+        else:
+            if not self.run and abs(self.speedx) > WALK_SPEED:
+                self.speedx -= self.acceleration if self.speedx > 0 else -self.acceleration
+                if abs(self.speedx) < WALK_SPEED:
+                    self.speedx = WALK_SPEED if self.speedx > 0 else -WALK_SPEED
 
         self.run_lock = self.run and not self.prev_run
 
         fireball_table = [fireballs, fireballs2, fireballs3, fireballs4]
 
-        if self.size == 2 and len(fireball_table[self.player_number - 1]) < max_fireballs:
+        if self.size == 2 and len(fireball_table[self.player_number - 1]) < max_fireballs and not self.down:
             if self.run:
                 if self.fire_timer < self.fire_duration:
                     if self.fire_timer == 0:
@@ -849,7 +909,7 @@ class Player:
             self.speedy = -self.min_jump
             self.jump_timer = 1
         elif self.jump and 0 < self.jump_timer < JUMP_HOLD_TIME:
-            if self.jump_timer == 1 and self.fall_timer < self.fall_duration:
+            if self.jump_timer == 1:
                 sound_player.play_sound(jump_sound if self.size == 0 else jumpbig_sound)
                 self.fall_timer = self.fall_duration
                 self.jump_speedx = abs(self.speedx)
@@ -863,7 +923,7 @@ class Player:
 
         if self.can_control:
             if self.fall_timer < self.fall_duration and self.controls_enabled:
-                if abs(self.speedx) == RUN_SPEED:
+                if abs(self.speedx) >= RUN_SPEED:
                     self.run_timer = range_number(self.run_timer + 1, MIN_RUN_TIMER, MAX_RUN_TIMER)
                 else:
                     self.run_timer = range_number(self.run_timer - 1, MIN_RUN_TIMER, MAX_RUN_TIMER)
@@ -913,7 +973,7 @@ class Player:
                     sound_player.play_sound(bump_sound)
                     if tile.bonk_bounce:
                         tile.bouncing = True
-                        tile.bounce_speed = -2
+                        tile.bounce_speed = -1
                         tile.y_offset = 0
                     if not self.size == 0:
                         tile.break_block()
@@ -945,8 +1005,8 @@ class Player:
             self.can_control = True
         
         for item in items:
-            if self.rect.colliderect(item.rect):
-                if self.size != item.size:
+            if self.rect.colliderect(item.rect) and not item.sprouting:
+                if self.size != item.size and self.size != 2:
                     self.grow_timer = 0
                     old_size = 0 if self.size == 0 and item.size == 1 else self.size
                     self.grow_animation = [item.size, old_size, item.size, old_size, item.size, old_size, item.size]
@@ -956,15 +1016,13 @@ class Player:
 
         for enemy in enemies:
             if self.rect.colliderect(enemy.rect):
-                # Check if the player is falling and lands on top of the enemy
                 if self.speedy > 0 and self.rect.bottom - enemy.rect.top < 5:
                     enemy.stomp()
                     
-                    # Apply jump physics
-                    self.speedy = -self.max_jump  # Bounce upwards with max jump strength
-                    self.jump_timer = 1  # Reset jump timer to allow jump extension
-                    self.on_ground = False  # Prevent player from being immediately grounded
-                    self.fall_timer = self.fall_duration  # Reset fall timer for smooth bounce transition
+                    self.speedy = -self.max_jump
+                    self.jump_timer = 1
+                    self.on_ground = False
+                    self.fall_timer = self.fall_duration
 
         self.rect.x = range_number(camera.x + SCREEN_WIDTH - self.rect.width, camera.x, self.rect.x)
         self.rect.y = range_number(camera.y + SCREEN_HEIGHT - self.rect.height, camera.y, self.rect.y)
@@ -983,34 +1041,55 @@ class Player:
                 self.fall_timer = 0
 
         if self.can_control:
+            reset_frame_timer = True
+
             if self.down:
-                self.frame_timer = 0
-                self.anim_state = (3 if self.speedy > 0 and self.fall_timer >= self.fall_duration else 2) + (8 + self.walk_frames + self.run_frames if self.carrying_item else 0)
-            elif self.size == 2 and 0 < self.fire_timer < self.fire_duration and not self.fire_lock and not self.down:
-                self.frame_timer = 0
+                self.anim_state = (3 if self.speedy > 0 and self.fall_timer >= self.fall_duration else 2) + (
+                    8 + self.walk_frames + self.run_frames if self.carrying_item else 0
+                )
+            elif self.size == 2 and 0 < self.fire_timer < self.fire_duration and not self.fire_lock:
                 self.anim_state = self.walk_frames * 2 + self.run_frames + 17
             elif self.skidding:
                 self.frame_timer = (self.frame_timer + abs(self.speedx) / 1.25) if self.carrying_item else 0
-                self.anim_state = (12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames if self.carrying_item else 4 + self.walk_frames
+                self.anim_state = (
+                    (12 + self.walk_frames + self.run_frames if self.carrying_item else 4)
+                    + int(self.frame_timer // FRAME_SPEED) % self.walk_frames
+                    if self.carrying_item
+                    else 4 + self.walk_frames
+                )
+                reset_frame_timer = False
             elif self.speedy < 0:
-                self.frame_timer = 0
-                self.anim_state = ((12 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0)) if self.carrying_item else (7 + self.run_frames if self.pspeed else 5)) + self.walk_frames
+                self.anim_state = (
+                    (12 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0))
+                    if self.carrying_item
+                    else (7 + self.run_frames if self.pspeed else 5)
+                ) + self.walk_frames
             elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.down):
-                self.frame_timer = 0
-                self.anim_state = ((13 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0)) if self.carrying_item else (8 + self.run_frames if self.pspeed else 6)) + self.walk_frames
-            elif self.speedx == 0 and self.on_ground and not self.down:
-                self.frame_timer = 0
+                self.anim_state = (
+                    (13 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0))
+                    if self.carrying_item
+                    else (8 + self.run_frames if self.pspeed else 6)
+                ) + self.walk_frames
+            elif self.speedx == 0 and self.on_ground:
                 self.anim_state = (9 + self.walk_frames + self.run_frames) if self.carrying_item else 1
                 self.speedx = 0
             elif abs(self.speedx) > MIN_SPEEDX * 2 and self.fall_timer < self.fall_duration and (not self.pspeed or self.carrying_item):
                 self.frame_timer += abs(self.speedx) / 1.25
-                self.anim_state = (12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames
+                self.anim_state = (
+                    (12 + self.walk_frames + self.run_frames if self.carrying_item else 4)
+                    + int(self.frame_timer // FRAME_SPEED) % self.walk_frames
+                )
+                reset_frame_timer = False
             elif self.pspeed and self.fall_timer < self.fall_duration and not self.carrying_item:
                 self.frame_timer += abs(self.speedx) / 1.25
                 self.anim_state = 7 + self.walk_frames + int(self.frame_timer // FRAME_SPEED) % self.run_frames
+                reset_frame_timer = False
+
+            if reset_frame_timer:
+                self.frame_timer = 0
         else:
             self.anim_state = 1
-        
+
         self.prev_run = self.run
 
     def draw(self):
@@ -1127,21 +1206,7 @@ fireballs3 = []
 fireballs4 = []
 debris = []
 lives = []
-beep_sound = load_sound("beep")
-break_sound = load_sound("break")
-bump_sound = load_sound("bump")
-coin_sound = load_sound("coin")
-fireball_sound = load_sound("fireball")
-jump_sound = load_sound("jump")
-jumpbig_sound = load_sound("jumpbig")
-oneup_sound = load_sound("oneup")
-pipe_sound = load_sound("pipe")
-powerup_sound = load_sound("powerup")
-pspeed_sound = load_sound("pspeed")
-shot_sound = load_sound("shot")
-skid_sound = load_sound("skid")
-sprout_sound = load_sound("sprout")
-stomp_sound = load_sound("stomp")
+power_meters = []
 fade_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
 a = 255
 fade_in = False
@@ -1223,13 +1288,15 @@ while running:
                 logo = None
                 players = []
                 power_meters = []
+                tiles = []
+                items = []
+                enemies = []
                 fireballs = []
                 fireballs2 = []
                 fireballs3 = []
                 fireballs4 = []
-                tiles = [Brick(25 + i, 21 + j) for i in range(32) for j in range(3)]
-                enemies = [Goomba(56, 20)]
-                items = [FireFlower(25, 20)]
+                debris = []
+                lives = []
                 dt = 0
                 bgm_player.play_music("overworld")
                 for i in range(player_count):
@@ -1396,6 +1463,11 @@ while running:
             if not any(player.grow_animation for player in players):
                 power_meter.update()
 
+        for item in items:
+            item.draw()
+            if item.is_visible() and not any(player.grow_animation for player in players):
+                item.update()
+
         for tile in tiles:
             tile.draw()
             tile.update()
@@ -1431,11 +1503,6 @@ while running:
         for player in players:
             player.draw()
             player.update()
-
-        for item in items:
-            item.draw()
-            if item.is_visible() and not any(player.grow_animation for player in players):
-                item.update()
 
         for enemy in enemies:
             enemy.draw()
