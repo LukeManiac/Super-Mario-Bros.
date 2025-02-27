@@ -1,4 +1,4 @@
-import pygame, json, math, random
+import pygame, json, math
 from os.path import dirname, abspath, exists, getsize
 
 pygame.init()
@@ -76,17 +76,20 @@ def create_course(data):
                         for param in (params if isinstance(params, (list, tuple)) else [params])
                     ]
                     obj = globals()[class_name](*obj_params)
-                    if hasattr(obj, "spriteset") and "spriteset" in data:
-                        obj.spriteset = data["spriteset"] - 1
+                    if hasattr(obj, "spriteset"):
+                        obj.spriteset = data["spriteset"] if "spriteset" in data else 0
 
                     tiles.append(obj)
+
+    if "spawnpositions" in data and isinstance(data["spawnpositions"], list):
+        globals()["spawnposx"], globals()["spawnposy"] = data["spawnpositions"]
     
     globals()["tiles"] = tiles
 
     for category, items in data.items():
-        if category in ("music", "tiles", "spriteset"):  
+        if category in ("music", "tiles", "spriteset", "spawnpositions"):
             continue
-        
+
         object_list = []
         if isinstance(items, dict):
             for class_name, params_list in items.items():
@@ -97,11 +100,11 @@ def create_course(data):
                             for param in (params if isinstance(params, (list, tuple)) else [params])
                         ]
                         obj = globals()[class_name](*obj_params)
-                        if hasattr(obj, "spriteset") and "spriteset" in data:
-                            obj.spriteset = data["spriteset"] - 1
+                        if hasattr(obj, "spriteset"):
+                            obj.spriteset = data["spriteset"] if "spriteset" in data else 0
 
                         object_list.append(obj)
-        
+
         globals()[category] = object_list
 
 def create_text(text, position, color=(255, 255, 255), alignment="left", stickxtocamera=False, stickytocamera=False, scale=1):
@@ -151,37 +154,33 @@ def create_text(text, position, color=(255, 255, 255), alignment="left", stickxt
         for char_surface, char_x in rendered_line:
             screen.blit(char_surface, (start_x + char_x, line_y))
 
-def create_pipe(x, y, length=2, pipe_dir="up", color=1):
+def create_pipe(x, y, length=2, can_enter=False, new_zone=None, pipe_dir="up", color=1):
     color -= 1
     pipes = []
-    if pipe_dir == "up":
-        for i in range(2):
-            for j in range(length):
-                pipe_id = i + (j * 2) + 1
-                while pipe_id >= 5:
-                    pipe_id -= 2
-                pipes.append(Tile(x + i, y + j, f"pipe{pipe_id}", color))
-    elif pipe_dir == "down":
-        for i in range(2):
-            for j in range(length):
-                pipe_id = i + (j * 2) + 1
-                while pipe_id >= 5:
-                    pipe_id -= 2
-                pipes.append(Tile(x + i, y - j, f"pipe{pipe_id + (4 if pipe_id == 1 or pipe_id == 2 else 0)}", color))
-    elif pipe_dir == "left":
-        for i in range(2):
-            for j in range(length):
-                pipe_id = i + (j * 2) + 1
-                while pipe_id >= 5:
-                    pipe_id -= 2
-                pipes.append(Tile(x - j, y - i, f"pipe{pipe_id + (pipe_id == 3) * 8 + (pipe_id == 4) * 4 + (pipe_id == 1) * 11 + (pipe_id == 2) * 7}", color))
-    elif pipe_dir == "right":
-        for i in range(2):
-            for j in range(length):
-                pipe_id = i + (j * 2) + 1
-                while pipe_id >= 5:
-                    pipe_id -= 2
-                pipes.append(Tile(x + j, y - i, f"pipe{pipe_id + (pipe_id == 3) * 8 + (pipe_id == 4) * 4 + (pipe_id == 1) * 9 + (pipe_id == 2) * 5}", color))
+    id_adjustments = {
+        "up": lambda pid: pid,
+        "down": lambda pid: pid + (4 if pid in {1, 2} else 0),
+        "left": lambda pid: pid + (pid == 3) * 8 + (pid == 4) * 4 + (pid == 1) * 11 + (pid == 2) * 7,
+        "right": lambda pid: pid + (pid == 3) * 8 + (pid == 4) * 4 + (pid == 1) * 9 + (pid == 2) * 5,
+    }
+    coord_adjustments = {
+        "up": lambda i, j: (x + i, y + j),
+        "down": lambda i, j: (x + i, y - j),
+        "left": lambda i, j: (x - j, y - i),
+        "right": lambda i, j: (x + j, y - i),
+    }
+
+    for i in range(2):
+        for j in range(length):
+            pipe_id = i + (j * 2) + 1
+            while pipe_id >= 5:
+                pipe_id -= 2
+
+            px, py = coord_adjustments[pipe_dir](i, j)
+            pipes.append(Tile(px, py, f"pipe{id_adjustments[pipe_dir](pipe_id)}", color))
+            if can_enter and i == 0 and j == 0:
+                pipe_markers.append(PipeMarker(px + (0.5 if pipe_dir == "up" or pipe_dir == "down" else 0), py + (1 if pipe_dir == "left" or pipe_dir == "right" else 0), pipe_dir, new_zone))
+
     return pipes
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 640, 400
@@ -205,6 +204,7 @@ fireball_sound = load_sound("fireball")
 jump_sound = load_sound("jump")
 jumpbig_sound = load_sound("jumpbig")
 oneup_sound = load_sound("oneup")
+pause_sound = load_sound("pause")
 pipe_sound = load_sound("pipe")
 powerup_sound = load_sound("powerup")
 pspeed_sound = load_sound("pspeed")
@@ -213,9 +213,26 @@ skid_sound = load_sound("skid")
 sprout_sound = load_sound("sprout")
 stomp_sound = load_sound("stomp")
 
+class PipeMarker:
+    def __init__(self, x, y, pipe_dir, zone):
+        self.x = x * 16
+        self.y = y * 16 + 8
+        if pipe_dir == "up":
+            self.y -= 1
+        elif pipe_dir == "down":
+            self.y += 1
+        elif pipe_dir == "left":
+            self.x -= 1
+        elif pipe_dir == "right":
+            self.x += 1
+        self.pipe_dir = pipe_dir
+        self.zone = zone
+        self.rect = pygame.Rect(self.x, self.y, 16, 16)
+
 class SFXPlayer:
     def __init__(self):
         self.sounds = {}
+        self.paused = False
 
     def play_sound(self, sound):
         self.sounds[sound] = sound
@@ -242,6 +259,7 @@ class BGMPlayer:
     def __init__(self):
         self.loop_point = 0
         self.music_playing = False
+        self.paused = False
 
     def play_music(self, music):
         self.stop_music()
@@ -263,9 +281,14 @@ class BGMPlayer:
     def set_volume(self, volume):
         pygame.mixer.music.set_volume(volume)
 
+    def pause_music(self):
+        if self.music_playing:
+            self.paused = not self.paused
+            (pygame.mixer.music.pause if self.paused else pygame.mixer.music.unpause)()
+
     def update(self):
         if self.music_playing:
-            if not pygame.mixer.music.get_busy():
+            if nor(self.paused, pygame.mixer.music.get_busy()):
                 pygame.mixer.music.play(0, self.loop_point)
                 self.music_playing = True
 
@@ -380,7 +403,7 @@ class PowerMeter:
         for x in range(recolored.get_width()):
             for y in range(recolored.get_height()):
                 pixel = recolored.unmap_rgb(pixel_array[x, y])
-                if pixel[:3] == [255, 255, 255]:
+                if pixel[:3] == (255, 255, 255):
                     pixel_array[x, y] = recolored.map_rgb([*self.player.color, pixel[3]])
 
         del pixel_array
@@ -407,6 +430,7 @@ class Score:
         self.frame_index = {100: 0, 200: 1, 400: 2, 800: 3, 1000: 4, 2000: 5, 4000: 6, 8000: 7, 10000: 8}.get(points, -1)
         self.image = load_sprite("score")
         self.dt = 0
+        globals()["score"] += points
 
     def update(self):
         self.dt += 1
@@ -434,12 +458,9 @@ class CoinAnimation:
         screen.blit(self.image.subsurface(self.sprites[self.dt]), (self.x - camera.x, self.y - camera.y))
 
 class CoinHUD:
-    def __init__(self, spriteset=1, coins=0):
+    def __init__(self, coins=0):
         self.x, self.y = 12, 16
         self.image = load_sprite("coinhud")
-        self.sprites = [[pygame.Rect(col * 5, row * 8, 5, 8) for col in range(5)] for row in range(4)]
-        self.frame_index = 0
-        self.spriteset = spriteset
         self.coins = coins
 
     def add_coins(self, coin):
@@ -451,11 +472,8 @@ class CoinHUD:
             for player in players:
                 player.lives += 1
 
-    def update(self):
-        self.frame_index = int((dt / (FPS / 5) / 0.75) % 5)
-
     def draw(self):
-        screen.blit(self.image.subsurface(self.sprites[self.spriteset][self.frame_index]), (self.x, self.y))
+        screen.blit(self.image, (self.x, self.y))
 
 class PlayerHUD:
     def __init__(self, player):
@@ -463,8 +481,15 @@ class PlayerHUD:
         self.image = load_sprite("playerhud")
         self.sprites = [[pygame.Rect(x * 16, y * 16, 16, 16) for x in range(3)] for y in range(4)]
 
+    def update(self):
+        self.player_number = self.player.player_number - 1
+        self.size = self.player.size
+
     def draw(self):
-        screen.blit(self.image.subsurface(self.sprites[self.player.player_number - 1][self.player.size]), (12, 20 + self.player.player_number * 16))
+        try:
+            screen.blit(self.image.subsurface(self.sprites[self.player_number][self.size]), (12, 20 + self.player.player_number * 16))
+        except AttributeError:
+            pass
 
 class Tile:
     def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False, breakable=False, item=None, item_spawn_anim=True, item_sound=sprout_sound):
@@ -680,9 +705,9 @@ class Mushroom:
                 if tile.broken:
                     continue
                 if self.rect.colliderect(tile.rect):
-                    if self.speedx > 0:
+                    if self.speedx > 0 and tile.left_collide:
                         self.x = tile.rect.left - self.rect.width
-                    elif self.speedx < 0:
+                    elif self.speedx < 0 and tile.right_collide:
                         self.x = tile.rect.right
                     self.speedx *= -1
                     break
@@ -697,10 +722,10 @@ class Mushroom:
                 if tile.broken:
                     continue
                 if self.rect.colliderect(tile.rect):
-                    if self.speedy > 0:
+                    if self.speedy > 0 and tile.top_collide:
                         self.y = tile.rect.top - self.rect.height
                         self.speedy = -math.pi if tile.bouncing else 0
-                    elif self.speedy < 0:
+                    elif self.speedy < 0 and tile.bottom_collide:
                         self.y = tile.rect.bottom
                         self.speedy = 0
                     break
@@ -709,10 +734,10 @@ class Mushroom:
 
     def is_visible(self):
         return (
-            ((self.x > camera.x and self.x < camera.x + SCREEN_WIDTH) or
-            (self.x + self.rect.width > camera.x and self.x + self.rect.width < camera.x + SCREEN_WIDTH)) and
-            ((self.y > camera.y and self.y < camera.y + SCREEN_HEIGHT) or
-            (self.y + self.rect.height > camera.y and self.y + self.rect.height < camera.y + SCREEN_HEIGHT))
+            ((self.x > camera.x - 16 and self.x < camera.x + SCREEN_WIDTH + 16) or
+            (self.x + self.rect.width > camera.x - 16 and self.x + self.rect.width < camera.x + SCREEN_WIDTH + 16)) and
+            ((self.y > camera.y - 16 and self.y < camera.y + SCREEN_HEIGHT + 16) or
+            (self.y + self.rect.height > camera.y - 16 and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + 16))
         )
 
     def draw(self):
@@ -757,20 +782,36 @@ class FireFlower:
         self.frame_index = int((dt / 4) % 4)
         if self.sprouting:
             self.sprout_timer += 1
-            self.y += self.speedy
+            self.y += self.speedy / 2
 
             if self.sprout_timer >= SPROUT_SPEED * FPS:
                 self.sprouting = False
                 self.speedy = 0
         else:
+            self.y += self.speedy
+            self.speedy += self.gravity
             self.rect.topleft = (self.x, self.y)
+
+            self.rect.topleft = (self.x, self.y)
+
+            for tile in tiles:
+                if tile.broken:
+                    continue
+                if self.rect.colliderect(tile.rect):
+                    if self.speedy > 0:
+                        self.y = tile.rect.top - self.rect.height
+                        self.speedy = -math.pi if tile.bouncing else 0
+                    elif self.speedy < 0:
+                        self.y = tile.rect.bottom
+                        self.speedy = 0
+                    break
 
     def is_visible(self):
         return (
-            ((self.x > camera.x and self.x < camera.x + SCREEN_WIDTH) or
-            (self.x + self.rect.width > camera.x and self.x + self.rect.width < camera.x + SCREEN_WIDTH)) and
-            ((self.y > camera.y and self.y < camera.y + SCREEN_HEIGHT) or
-            (self.y + self.rect.height > camera.y and self.y + self.rect.height < camera.y + SCREEN_HEIGHT))
+            ((self.x > camera.x - 16 and self.x < camera.x + SCREEN_WIDTH + 16) or
+            (self.x + self.rect.width > camera.x - 16 and self.x + self.rect.width < camera.x + SCREEN_WIDTH + 16)) and
+            ((self.y > camera.y - 16 and self.y < camera.y + SCREEN_HEIGHT + 16) or
+            (self.y + self.rect.height > camera.y - 16 and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + 16))
         )
 
     def draw(self):
@@ -810,9 +851,9 @@ class Star:
                 if tile.broken:
                     continue
                 if self.rect.colliderect(tile.rect):
-                    if self.speedx > 0:
+                    if self.speedx > 0 and tile.left_collide:
                         self.x = tile.rect.left - self.rect.width
-                    elif self.speedx < 0:
+                    elif self.speedx < 0 and tile.right_collide:
                         self.x = tile.rect.right
                     self.speedx *= -1
                     break
@@ -827,10 +868,10 @@ class Star:
                 if tile.broken:
                     continue
                 if self.rect.colliderect(tile.rect):
-                    if self.speedy > 0:
+                    if self.speedy > 0 and tile.top_collide:
                         self.y = tile.rect.top - self.rect.height
                         self.speedy = -self.bounce
-                    elif self.speedy < 0:
+                    elif self.speedy < 0 and tile.bottom_collide:
                         self.y = tile.rect.bottom
                         self.speedy = 0
                     break
@@ -839,10 +880,10 @@ class Star:
 
     def is_visible(self):
         return (
-            ((self.x > camera.x and self.x < camera.x + SCREEN_WIDTH) or
-            (self.x + self.rect.width > camera.x and self.x + self.rect.width < camera.x + SCREEN_WIDTH)) and
-            ((self.y > camera.y and self.y < camera.y + SCREEN_HEIGHT) or
-            (self.y + self.rect.height > camera.y and self.y + self.rect.height < camera.y + SCREEN_HEIGHT))
+            ((self.x > camera.x - 16 and self.x < camera.x + SCREEN_WIDTH + 16) or
+            (self.x + self.rect.width > camera.x - 16 and self.x + self.rect.width < camera.x + SCREEN_WIDTH + 16)) and
+            ((self.y > camera.y - 16 and self.y < camera.y + SCREEN_HEIGHT + 16) or
+            (self.y + self.rect.height > camera.y - 16 and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + 16))
         )
 
     def draw(self):
@@ -863,7 +904,7 @@ class Fireball:
         self.frame_index = 0
         self.frame_timer = 0
         self.destroyed = False
-        self.gravity = 0.125
+        self.gravity = 0.25
         self.player = player
 
     def update(self):
@@ -882,11 +923,12 @@ class Fireball:
                 if tile.broken:
                     continue
                 if self.rect.colliderect(tile.rect):
-                    if self.speedx > 0:
+                    if self.speedx > 0 and tile.left_collide:
                         self.x = tile.rect.left - self.rect.width
-                    elif self.speedx < 0:
+                        self.destroy()
+                    elif self.speedx < 0 and tile.right_collide:
                         self.x = tile.rect.right
-                    self.destroy()
+                        self.destroy()
                     return
 
             self.y += self.speedy
@@ -897,10 +939,10 @@ class Fireball:
                 if tile.broken:
                     continue
                 if self.rect.colliderect(tile.rect):
-                    if self.speedy > 0:
+                    if self.speedy > 0 and tile.top_collide:
                         self.y = tile.rect.top - self.rect.height
                         self.speedy = -self.bounce
-                    elif self.speedy < 0:
+                    elif self.speedy < 0 and tile.bottom_collide:
                         self.y = tile.rect.bottom
                         self.speedy = 0
                         self.destroy()
@@ -910,7 +952,7 @@ class Fireball:
             for enemy in enemies:
                 if self.rect.colliderect(enemy.rect):
                     self.destroy()
-                    enemy.shot()
+                    enemy.shot(self)
 
             self.rect.topleft = (self.x, self.y)
 
@@ -926,10 +968,10 @@ class Fireball:
 
     def is_visible(self):
         return (
-            ((self.x > camera.x and self.x < camera.x + SCREEN_WIDTH) or
-            (self.x + self.rect.width > camera.x and self.x + self.rect.width < camera.x + SCREEN_WIDTH)) and
-            ((self.y > camera.y and self.y < camera.y + SCREEN_HEIGHT) or
-            (self.y + self.rect.height > camera.y and self.y + self.rect.height < camera.y + SCREEN_HEIGHT))
+            ((self.x > camera.x - 16 and self.x < camera.x + SCREEN_WIDTH + 16) or
+            (self.x + self.rect.width > camera.x - 16 and self.x + self.rect.width < camera.x + SCREEN_WIDTH + 16)) and
+            ((self.y > camera.y - 16 and self.y < camera.y + SCREEN_HEIGHT + 16) or
+            (self.y + self.rect.height > camera.y - 16 and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + 16))
         )
 
     def draw(self):
@@ -975,9 +1017,9 @@ class Goomba:
                     if tile.broken:
                         continue
                     if self.rect.colliderect(tile.rect):
-                        if self.speedx > 0:
+                        if self.speedx > 0 and tile.left_collide:
                             self.x = tile.rect.left - self.rect.width
-                        elif self.speedx < 0:
+                        elif self.speedx < 0 and tile.right_collide:
                             self.x = tile.rect.right
                         self.speedx *= -1
                         break
@@ -992,12 +1034,12 @@ class Goomba:
                     if tile.broken:
                         continue
                     if self.rect.colliderect(tile.rect):
-                        if self.speedy > 0:
+                        if self.speedy > 0 and tile.top_collide:
                             self.y = tile.rect.top - self.rect.height
                             self.speedy = 0
                             if tile.bouncing:
                                 self.shot()
-                        elif self.speedy < 0:
+                        elif self.speedy < 0 and tile.bottom_collide:
                             self.y = tile.rect.bottom
                             self.speedy = 0
                         break
@@ -1031,10 +1073,10 @@ class Goomba:
 
     def is_visible(self):
         return (
-            ((self.x > camera.x and self.x < camera.x + SCREEN_WIDTH) or
-            (self.x + self.rect.width > camera.x and self.x + self.rect.width < camera.x + SCREEN_WIDTH)) and
-            ((self.y > camera.y and self.y < camera.y + SCREEN_HEIGHT) or
-            (self.y + self.rect.height > camera.y and self.y + self.rect.height < camera.y + SCREEN_HEIGHT))
+            ((self.x > camera.x - 16 and self.x < camera.x + SCREEN_WIDTH + 16) or
+            (self.x + self.rect.width > camera.x - 16 and self.x + self.rect.width < camera.x + SCREEN_WIDTH + 16)) and
+            ((self.y > camera.y - 16 and self.y < camera.y + SCREEN_HEIGHT + 16) or
+            (self.y + self.rect.height > camera.y - 16 and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + 16))
         )
 
     def draw(self):
@@ -1054,6 +1096,13 @@ class Deco:
 
 class Player:
     def __init__(self, x, y, lives=3, size=0, character="mario", controls_enabled=True, walk_cutscene=False, player_number=1):
+        with open(f"{main_directory}/character_properties.json") as file:
+            self.properties = json.load(file)
+        self.walk_frames = self.properties[character]["walk_frames"]
+        self.run_frames = self.properties[character]["run_frames"]
+        self.acceleration = self.properties[character]["acceleration"]
+        self.max_jump = self.properties[character]["max_jump"]
+        self.color = self.properties[character]["color"]
         self.spritesheet = load_sprite(character)
         self.controls_enabled = controls_enabled
         self.can_control = controls_enabled
@@ -1080,19 +1129,12 @@ class Player:
         self.size = size
         self.walk_cutscene = walk_cutscene
         self.controls = [controls, controls2, controls3, controls4][player_number - 1]
-        with open(f"{main_directory}/character_properties.json") as file:
-            self.properties = json.load(file)
-        self.walk_frames = self.properties[character]["walk_frames"]
-        self.run_frames = self.properties[character]["run_frames"]
-        self.acceleration = self.properties[character]["acceleration"]
-        self.max_jump = self.properties[character]["max_jump"]
-        self.color = self.properties[character]["color"]
         self.skidding = False
         self.gravity = 0.25
         self.min_jump = 1
         self.run_timer = 0
         self.update_hitbox()
-        self.rect.y -= self.rect.height
+        self.rect.y -= self.rect.height - (0 if self.size == 0 else 12)
         self.carrying_item = False
         self.fall_timer = 0
         self.fall_duration = 0.125
@@ -1119,6 +1161,10 @@ class Player:
         self.star_timer = 0
         self.star_combo = 0
         self.star_music = False
+        self.piping = False
+        self.pipe_dir = False
+        self.pipe_timer = 0
+        self.pipe_speed = 0.5
 
     def add_life(self):
         if nitpicks["infinite_lives"]:
@@ -1173,12 +1219,12 @@ class Player:
                     self.dead_music = False
                     self.dead = False
         else:
-            self.left = (keys[self.controls["left"]]) if self.controls_enabled and self.can_control else False
-            self.right = (keys[self.controls["right"]]) if self.controls_enabled and self.can_control else False
-            self.up = (keys[self.controls["up"]]) if self.controls_enabled and self.can_control else False
-            self.down = (keys[self.controls["down"]] if self.fall_timer < self.fall_duration else self.down) if self.controls_enabled and self.can_control else False
-            self.run = (keys[self.controls["run"]]) if self.controls_enabled and self.can_control else False
-            self.jump = (keys[self.controls["jump"]]) if self.controls_enabled and self.can_control else False
+            self.left = (keys[self.controls["left"]]) if self.controls_enabled and self.can_control and not self.piping else False
+            self.right = (keys[self.controls["right"]]) if self.controls_enabled and self.can_control and not self.piping else False
+            self.up = (keys[self.controls["up"]]) if self.controls_enabled and self.can_control and not self.piping else False
+            self.down = (keys[self.controls["down"]] if self.fall_timer < self.fall_duration else self.down) if self.controls_enabled and self.can_control and not self.piping else False
+            self.run = (keys[self.controls["run"]]) if self.controls_enabled and self.can_control and not self.piping else False
+            self.jump = (keys[self.controls["jump"]]) if self.controls_enabled and self.can_control and not self.piping else False
             if self.shrunk:
                 if self.shrunk_timer < 60:
                     self.can_draw = (self.shrunk_timer // 10) % 2 == 0
@@ -1186,8 +1232,55 @@ class Player:
                     self.can_draw = (self.shrunk_timer // 5) % 2 == 0
             else:
                 self.can_draw = True
+
+            if self.shrunk and not self.size_change:
+                self.shrunk_timer += 1
+
+            if self.shrunk_timer >= 120:
+                self.shrunk = False
+                self.shrunk_timer = 0
+                self.can_draw = True
+
+            for pipe_marker in pipe_markers:
+                if self.rect.colliderect(pipe_marker.rect) and nor(self.piping, self.dead, self.size_change):
+                    if self.down and self.rect.bottom + 2 >= pipe_marker.rect.top >= self.rect.bottom - 2 and pipe_marker.rect.left - 2 <= self.rect.x <= pipe_marker.rect.right - 2 and pipe_marker.pipe_dir == "up":
+                        self.speedx = 0
+                        self.speedy = self.pipe_speed
+                        self.piping = True
+                        sound_player.play_sound(pipe_sound)
+
+                    elif self.up and self.rect.top + 2 >= pipe_marker.rect.bottom >= self.rect.top - 2 and pipe_marker.rect.left - 2 <= self.rect.x <= pipe_marker.rect.right - 2 and pipe_marker.pipe_dir == "down":
+                        self.speedx = 0
+                        self.speedy = -self.pipe_speed
+                        self.piping = True
+                        sound_player.play_sound(pipe_sound)
+
+                    elif self.right and self.rect.right - 2 <= pipe_marker.rect.left <= self.rect.right + 2 and self.fall_timer < self.fall_duration and pipe_marker.pipe_dir == "left":
+                        self.speedx = self.pipe_speed
+                        self.speedy = 0
+                        self.piping = True
+                        sound_player.play_sound(pipe_sound)
+
+                    elif self.left and self.rect.left - 2 <= pipe_marker.rect.right <= self.rect.left + 2 and self.fall_timer < self.fall_duration and pipe_marker.pipe_dir == "right":
+                        self.speedx = -self.pipe_speed
+                        self.speedy = 0
+                        self.piping = True
+                        sound_player.play_sound(pipe_sound)
+
+            if self.piping:
+                if self.pipe_timer <= 60:
+                    self.rect.x += self.speedx
+                    self.rect.y += self.speedy
+                    self.pipe_timer += 1
+                if abs(self.speedx) < MIN_SPEEDX:
+                    self.anim_state = self.walk_frames * 2 + self.run_frames + 18
+                else:
+                    self.frame_timer += abs(self.speedx) / 1.25
+                    self.anim_state = ((12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames)
+                return
+
             if self.on_ground:
-                self.speed = RUN_SPEED * (1.25 if self.pspeed else 1) if self.run else WALK_SPEED
+                self.speed = (RUN_SPEED * (1.25 if self.pspeed else 1) if self.run else WALK_SPEED) * (1.25 if self.star else 1)
             else:
                 if not self.run and abs(self.speedx) > WALK_SPEED:
                     self.speedx -= self.acceleration if self.speedx > 0 else -self.acceleration
@@ -1264,11 +1357,11 @@ class Player:
             if self.can_control:
                 if self.fall_timer < self.fall_duration and self.controls_enabled:
                     if abs(self.speedx) >= RUN_SPEED:
-                        self.run_timer = range_number(self.run_timer + 1, MIN_RUN_TIMER, MAX_RUN_TIMER)
+                        self.run_timer = range_number(self.run_timer + (3 if self.star else 1), MIN_RUN_TIMER, MAX_RUN_TIMER)
                     else:
-                        self.run_timer = range_number(self.run_timer - 1, MIN_RUN_TIMER, MAX_RUN_TIMER)
+                        self.run_timer = range_number(self.run_timer - (3 if self.star else 1), MIN_RUN_TIMER, MAX_RUN_TIMER)
                 elif not self.run_timer == MAX_RUN_TIMER:
-                    self.run_timer = range_number(self.run_timer - 1, MIN_RUN_TIMER, MAX_RUN_TIMER)
+                    self.run_timer = range_number(self.run_timer - (3 if self.star else 1), MIN_RUN_TIMER, MAX_RUN_TIMER)
 
             if self.rect.left <= camera.x:
                 self.rect.left = camera.x
@@ -1307,6 +1400,7 @@ class Player:
             self.on_ground = False
             if title_ground is not None:
                 title_ground.check_collision(self)
+
             for tile in tiles:
                 if tile.broken:
                     continue
@@ -1344,7 +1438,7 @@ class Player:
 
             if self.size_change:
                 if self.can_control:
-                    self.old_controls = [self.left, self.right, self.up, self.down, self.run, self.jump, self.speedx, self.speedy, self.jump_timer, self.run_timer, self.fall_timer, self.falling, self.fire_timer]
+                    self.old_controls = [self.left, self.right, self.up, self.down, self.run, self.jump, self.speedx, self.speedy, self.jump_timer, self.run_timer, self.fall_timer, self.falling, self.fire_timer, self.can_draw]
                 self.can_control = False
                 self.left = False
                 self.right = False
@@ -1357,6 +1451,7 @@ class Player:
                 self.jump_timer = 0
                 self.run_timer = 0
                 self.fall_timer = 0
+                self.can_draw = True
                 self.falling = False
                 self.fire_timer = 0
                 if self.size_change_timer % 5 == 0:
@@ -1364,7 +1459,7 @@ class Player:
                 self.size_change_timer += 1
             else:
                 if self.controls_enabled and not self.can_control:
-                    self.left, self.right, self.up, self.down, self.run, self.jump, self.speedx, self.speedy, self.jump_timer, self.run_timer, self.fall_timer, self.falling, self.fire_timer = self.old_controls
+                    self.left, self.right, self.up, self.down, self.run, self.jump, self.speedx, self.speedy, self.jump_timer, self.run_timer, self.fall_timer, self.falling, self.fire_timer, self.can_draw = self.old_controls
                 self.can_control = True
 
             for enemy in enemies:
@@ -1423,23 +1518,12 @@ class Player:
                             sound_player.play_sound(powerup_sound)
 
             self.star_timer = (self.star_timer - 1/FPS) if self.star else 0
-            if self.star:
-                if self.star_timer < 1 and self.star_music:
-                    self.star_music = False
-                elif self.star_timer <= 0:
+            if self.star and self.star_timer <= 0:
                     self.star_timer = 0
                     self.star = False
 
             self.rect.x = range_number(camera.x + SCREEN_WIDTH - self.rect.width, camera.x, self.rect.x)
             self.rect.y = max(self.rect.y, camera.y)
-
-            if self.shrunk and not self.size_change:
-                self.shrunk_timer += 1
-
-            if self.shrunk_timer >= 120:
-                self.shrunk = False
-                self.shrunk_timer = 0
-                self.can_draw = True
 
             if self.rect.top >= SCREEN_HEIGHT:
                 self.dead = True
@@ -1460,55 +1544,34 @@ class Player:
 
             self.prev_run = self.run
 
-            if self.can_control:
-                reset_frame_timer = True
+            reset_frame_timer = True
 
-                if self.down:
-                    self.anim_state = (3 if self.speedy > 0 and self.fall_timer >= self.fall_duration else 2) + (
-                        8 + self.walk_frames + self.run_frames if self.carrying_item else 0
-                    )
-                elif self.size == 2 and 0 < self.fire_timer < self.fire_duration and not self.fire_lock:
-                    self.anim_state = self.walk_frames * 2 + self.run_frames + 17
-                elif self.skidding:
-                    self.frame_timer = (self.frame_timer + abs(self.speedx) / 1.25) if self.carrying_item else 0
-                    self.anim_state = (
-                        (12 + self.walk_frames + self.run_frames if self.carrying_item else 4)
-                        + int(self.frame_timer // FRAME_SPEED) % self.walk_frames
-                        if self.carrying_item
-                        else 4 + self.walk_frames
-                    )
-                    reset_frame_timer = False
-                elif self.speedy < 0:
-                    self.anim_state = (
-                        (12 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0))
-                        if self.carrying_item
-                        else (7 + self.run_frames if self.pspeed else 5)
-                    ) + self.walk_frames
-                elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.down):
-                    self.anim_state = (
-                        (13 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0))
-                        if self.carrying_item
-                        else (8 + self.run_frames if self.pspeed else 6)
-                    ) + self.walk_frames
-                elif self.speedx == 0 and self.on_ground:
-                    self.anim_state = (9 + self.walk_frames + self.run_frames) if self.carrying_item else 1
-                    self.speedx = 0
-                elif abs(self.speedx) > MIN_SPEEDX * 2 and self.fall_timer < self.fall_duration and (not self.pspeed or self.carrying_item):
-                    self.frame_timer += abs(self.speedx) / 1.25
-                    self.anim_state = (
-                        (12 + self.walk_frames + self.run_frames if self.carrying_item else 4)
-                        + int(self.frame_timer // FRAME_SPEED) % self.walk_frames
-                    )
-                    reset_frame_timer = False
-                elif self.pspeed and self.fall_timer < self.fall_duration and not self.carrying_item:
-                    self.frame_timer += abs(self.speedx) / 1.25
-                    self.anim_state = 7 + self.walk_frames + int(self.frame_timer // FRAME_SPEED) % self.run_frames
-                    reset_frame_timer = False
+            if self.down:
+                self.anim_state = (3 if self.speedy > 0 and self.fall_timer >= self.fall_duration else 2) + (8 + self.walk_frames + self.run_frames if self.carrying_item else 0)
+            elif self.size == 2 and 0 < self.fire_timer < self.fire_duration and not self.fire_lock:
+                self.anim_state = self.walk_frames * 2 + self.run_frames + 17
+            elif self.skidding:
+                self.frame_timer = (self.frame_timer + abs(self.speedx) / 1.25) if self.carrying_item else 0
+                self.anim_state = ((12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames if self.carrying_item else 4 + self.walk_frames)
+                reset_frame_timer = False
+            elif self.speedy < 0:
+                self.anim_state = ((12 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0)) if self.carrying_item else (7 + self.run_frames if self.pspeed else 5)) + self.walk_frames
+            elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.down):
+                self.anim_state = ((13 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0)) if self.carrying_item else (8 + self.run_frames if self.pspeed else 6)) + self.walk_frames
+            elif self.speedx == 0 and self.on_ground:
+                self.anim_state = (9 + self.walk_frames + self.run_frames) if self.carrying_item else 1
+                self.speedx = 0
+            elif abs(self.speedx) > MIN_SPEEDX * 2 and self.fall_timer < self.fall_duration and (not self.pspeed or self.carrying_item):
+                self.frame_timer += abs(self.speedx) / 1.25
+                self.anim_state = ((12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames)
+                reset_frame_timer = False
+            elif self.pspeed and self.fall_timer < self.fall_duration and not self.carrying_item:
+                self.frame_timer += abs(self.speedx) / 1.25
+                self.anim_state = 7 + self.walk_frames + int(self.frame_timer // FRAME_SPEED) % self.run_frames
+                reset_frame_timer = False
 
-                if reset_frame_timer:
-                    self.frame_timer = 0
-            else:
-                self.anim_state = 1
+            if reset_frame_timer:
+                self.frame_timer = 0
 
     def draw(self):
         if self.can_draw:
@@ -1535,7 +1598,14 @@ class Player:
                     (255, 0, 128)
                 ]
                 cycle_time = 2 if self.star_timer >= 1 else 1
-                color_index = int((pygame.time.get_ticks() % (1250 / cycle_time)) / ((1250 / cycle_time) / len(colors)))
+
+                if pause:
+                    color_index = self.last_color_index if hasattr(self, 'last_color_index') else 0
+                else:
+                    self.time_passed = pygame.time.get_ticks()
+                    color_index = int((self.time_passed % (1250 / cycle_time)) / ((1250 / cycle_time) / len(colors)))
+                    self.last_color_index = color_index
+
                 current_color = colors[color_index]
                 star_mask.fill(current_color, special_flags=pygame.BLEND_RGBA_MULT)
                 screen.blit(star_mask, (draw_x, draw_y))
@@ -1629,7 +1699,7 @@ characters_table = ["mario", "luigi", "yellowtoad", "bluetoad"]
 font = pygame.font.Font(f"{main_directory}/font.ttf", font_size)
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.RESIZABLE | (pygame.FULLSCREEN if fullscreen else 0))
 clock = pygame.time.Clock()
-pygame.display.set_icon(load_sprite("icon"))
+pygame.display.set_icon(pygame.image.load(load_asset("icon.ico")))
 pygame.display.set_caption(f"Super Mario Bros. for Python (FPS: {round(clock.get_fps())})")
 player_dist = 20
 intro_players = [Player(x=centerx - player_dist / 2 + player_dist * i, y=SCREEN_HEIGHT, character=characters_table[i], controls_enabled=False, size=1) for i in range(len(characters_table))]
@@ -1640,6 +1710,7 @@ title_ground = TitleGround()
 background_manager = Background()
 decors = []
 tiles = []
+pipe_markers = []
 items = []
 enemies = []
 fireballs = []
@@ -1654,8 +1725,11 @@ player_lives = []
 players_hud = []
 world = 0
 course = 0
-course_data = None
 lives = 3
+score = 0
+spawnposx = None
+spawnposy = None
+course_data = None
 main_music = None
 star_music = None
 dead_music = None
@@ -1685,6 +1759,7 @@ exit_ready = False
 game = False
 everyone_dead = False
 numerical_change = 0.05
+pause = False
 coins = 0
 max_fireballs = infinity if nitpicks["infinite_fireballs"] else 2
 game_over = False
@@ -1751,6 +1826,7 @@ while running:
                 players = []
                 power_meters = []
                 tiles = []
+                pipe_markers = []
                 items = []
                 enemies = []
                 fireballs = []
@@ -1771,7 +1847,7 @@ while running:
                 dt = 0
                 bgm_player.play_music(main_music)
                 for i in range(player_count):
-                    players.append(Player(x=42 + i * 8, y=SCREEN_HEIGHT - 110, character=characters_table[i], player_number=i + 1, lives=lives))
+                    players.append(Player(x=spawnposx + i * 8, y=spawnposy, character=characters_table[i], player_number=i + 1, lives=lives))
                     power_meters.append(PowerMeter(players[i]))
                     players_hud.append(PlayerHUD(players[i]))
             elif everyone_dead:
@@ -1791,6 +1867,7 @@ while running:
                     players = []
                     power_meters = []
                     tiles = []
+                    pipe_markers = []
                     items = []
                     enemies = []
                     fireballs = []
@@ -1805,7 +1882,7 @@ while running:
                     dt = 0
                     bgm_player.play_music(main_music)
                     for i in range(player_count):
-                        players.append(Player(x=42 + i * 8, y=SCREEN_HEIGHT - 110, character=characters_table[i], player_number=i + 1, lives=player_lives[i]))
+                        players.append(Player(x=spawnposx + i * 8, y=spawnposy, character=characters_table[i], player_number=i + 1, lives=player_lives[i]))
                         power_meters.append(PowerMeter(players[i]))
                         players_hud.append(PlayerHUD(players[i]))
 
@@ -1954,7 +2031,8 @@ while running:
                 player.walk_cutscene = True
 
     elif game:
-        dt += 1
+        if not pause:
+            dt += 1
 
         background_manager.load_background("ground", 4)
         background_manager.update()
@@ -1970,42 +2048,55 @@ while running:
 
         for power_meter in power_meters:
             power_meter.draw()
-            if nor(any(player.size_change for player in players), everyone_dead):
+            if nor(any(player.size_change for player in players), everyone_dead, pause):
                 power_meter.update()
 
         for item in items:
             if item.is_visible():
                 item.draw()
-                if nor(any(player.size_change for player in players), everyone_dead):
+                if nor(any(player.size_change for player in players), everyone_dead, pause):
                     item.update()
-
-        for tile in tiles:
-            tile.draw()
-            tile.update()
-
-        for fireballs in [fireballs, fireballs2, fireballs3, fireballs4]:
-            for fireball in fireballs:
-                if fireball.is_visible():
-                    fireball.draw()
-                    if nor(any(player.size_change for player in players), everyone_dead):
-                        fireball.update()
-                else:
-                    fireballs.remove(fireball)
 
         if any(p.size_change for p in players):
             for player in players:
-                player.draw()
-                if player.size_change:
+                if player.piping:
+                    player.draw()
+        else:
+            for player in players:
+                if player.piping:
+                    player.draw()
+
+        for tile in tiles:
+            tile.draw()
+            if not pause:
+                tile.update()
+
+        for fireball_group in [fireballs, fireballs2, fireballs3, fireballs4]:
+            for fireball in fireball_group:
+                if fireball.is_visible():
+                    fireball.draw()
+                    if nor(any(player.size_change for player in players), everyone_dead, pause):
+                        fireball.update()
+                else:
+                    fireball_group.remove(fireball)
+
+        if any(p.size_change for p in players):
+            for player in players:
+                if not player.piping:
+                    player.draw()
+                if player.size_change and not pause:
                     player.update()
         else:
             for player in players:
-                player.draw()
-                player.update()
+                if not player.piping:
+                    player.draw()
+                if not pause:
+                    player.update()
 
         for enemy in enemies:
             if enemy.is_visible():
                 enemy.draw()
-                if nor(any(player.size_change for player in players), everyone_dead):
+                if nor(any(player.size_change for player in players), everyone_dead, pause):
                     enemy.update()
 
         player_lives = [player.lives for player in players]
@@ -2016,7 +2107,7 @@ while running:
             bgm_player.play_music(main_music)
             player.star_music = False
 
-        if any(player.star_timer >= 1 for player in players) and not any(player.star_music for player in players):
+        if any(player.star_timer >= 1 for player in players) and not all(player.star_music for player in players):
             bgm_player.play_music(star_music)
             player.star_music = True
 
@@ -2025,38 +2116,50 @@ while running:
 
         for debris_part in debris:
             debris_part.draw()
-            if nor(any(player.size_change for player in players), everyone_dead):
+            if nor(any(player.size_change for player in players), everyone_dead, pause):
                 debris_part.update()
 
         for particle in particles:
             particle.draw()
-            if nor(any(player.size_change for player in players), everyone_dead):
+            if nor(any(player.size_change for player in players), everyone_dead, pause):
                 particle.update()
 
         for overlay in overlays:
             overlay.draw()
-            overlay.update()
+            if not pause:
+                overlay.update()
 
         if hud:
             hud.draw()
-            hud.update()
 
             create_text(
                 text=f"x{hud.coins:02}",
                 position=(20, 16),
                 stickxtocamera=True,
+                stickytocamera=True,
+                scale=0.5
+            )
+
+            create_text(
+                text=f"{score:09}",
+                position=(560, 16),
+                stickxtocamera=True,
+                stickytocamera=True,
                 scale=0.5
             )
 
         if players_hud:
             for player_hud in players_hud:
                 player_hud.draw()
+                if nor(everyone_dead, pause):
+                    player_hud.update()
 
                 for player in players:
                     create_text(
                         text=f"x{player.lives}",
                         position=(32, 24 + player.player_number * 16),
                         stickxtocamera=True,
+                        stickytocamera=True,
                         scale=0.5
                     )
 
@@ -2095,6 +2198,10 @@ while running:
             binding_key = False
             current_bind = False
         elif event.type == pygame.KEYDOWN:
+            if game and (event.key == controls["pause"] or event.key == controls2["pause"] or event.key == controls3["pause"] or event.key == controls4["pause"]) and not any(player.piping for player in players):
+                pause = not pause
+                bgm_player.pause_music()
+                sound_player.play_sound(pause_sound)
             if game_over and dt >= 300 and not game_ready:
                 bgm_player.stop_music()
                 sound_player.sounds = {}
