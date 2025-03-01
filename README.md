@@ -22,7 +22,7 @@ To run the game, you need the following dependencies:
 - Pygame library
 
 ## Issues
-Unfortunately, controller support is not fully working in pygame so you'll need some kind of tools to convert joystick buttons to keyboard buttons and here's a fully free one: [AntiMicro](https://github.com/AntiMicro/antimicro)
+Unfortunately, controller support is not fully working in pygame so you'll need some kind of tools to convert joystick buttons to keyboard buttons. Click [here](https://github.com/AntiMicro/antimicro) to get me!
 
 ## Controls (can change anytime)
 ### Player 1:
