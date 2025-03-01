@@ -1774,7 +1774,6 @@ controls4 = {
     "pause": pygame.K_BREAK
 }
 fullscreen = False
-deadzone = 0.5
 
 if exists(f"{main_directory}/settings.json") and not getsize(f"{main_directory}/settings.json") == 0:
     with open(f"{main_directory}/settings.json", "r") as file:
@@ -1785,7 +1784,6 @@ if exists(f"{main_directory}/settings.json") and not getsize(f"{main_directory}/
         controls2 = data.get("controls2", controls2)
         controls3 = data.get("controls3", controls3)
         controls4 = data.get("controls4", controls4)
-        deadzone = data.get("deadzone", deadzone)
         fullscreen = data.get("fullscreen", fullscreen)
 
 nitpicks_list = [
@@ -1874,7 +1872,6 @@ old_selected_menu_index = 0
 old_pause_menu_index = 0
 old_mus_vol = mus_vol
 old_snd_vol = snd_vol
-old_deadzone = deadzone
 pipe_timer = 5
 dt = 0
 menu_area = 1
@@ -1907,12 +1904,10 @@ while running:
 
     mus_vol = round(range_number(mus_vol, 0, 1) * (1 / numerical_change)) / (1 / numerical_change)
     snd_vol = round(range_number(snd_vol, 0, 1) * (1 / numerical_change)) / (1 / numerical_change)
-    deadzone = round(range_number(deadzone, 0.1, 1) * (1 / numerical_change)) / (1 / numerical_change)
-    if nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_deadzone == deadzone):
+    if nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol):
         sound_player.play_sound(beep_sound)
     old_mus_vol = mus_vol
     old_snd_vol = snd_vol
-    old_deadzone = deadzone
 
     with open(f"{main_directory}/settings.json", "w") as settings:
         json.dump(
@@ -1923,7 +1918,6 @@ while running:
                 "controls2": controls2,
                 "controls3": controls3,
                 "controls4": controls4,
-                "deadzone": deadzone,
                 "fullscreen": fullscreen
             }, settings, indent=4)
 
@@ -2049,8 +2043,7 @@ while running:
                 ["controls (blue toad)", 1.125, (80, 80, 255)],
                 [f"music volume: {int(mus_vol * 100)}%", 1.25],
                 [f"sound volume: {int(snd_vol * 100)}%", 1.375],
-                [f"deadzone: {deadzone}", 1.5],
-                ["back", 1.625]
+                ["back", 1.5]
             ],
             [
                 [f"{bind_table[0]} (mario): {pygame.key.name(controls[bind_table[0]])}", 0.75],
@@ -2477,16 +2470,12 @@ while running:
                             mus_vol -= numerical_change
                         elif selected_menu_index == 5:
                             snd_vol -= numerical_change
-                        elif selected_menu_index == 6:
-                            deadzone -= numerical_change
                 elif event.key == controls["right"]:
                     if menu_options == title_screen[1]:
                         if selected_menu_index == 4:
                             mus_vol += numerical_change
                         elif selected_menu_index == 5:
                             snd_vol += numerical_change
-                        elif selected_menu_index == 6:
-                            deadzone += numerical_change
                 elif event.key == controls["run"] and not binding_key:
                     if menu_options == title_screen[1]:
                         selected_menu_index = 0
@@ -2522,7 +2511,7 @@ while running:
                             selected_menu_index = 0
                             old_selected_menu_index = 0
                             sound_player.play_sound(coin_sound)
-                        elif selected_menu_index == 7:
+                        elif selected_menu_index == 6:
                             selected_menu_index = 0
                             old_selected_menu_index = 0
                             menu_area = 1
@@ -2554,7 +2543,6 @@ with open(f"{main_directory}/settings.json", "w") as settings:
             "controls2": controls2,
             "controls3": controls3,
             "controls4": controls4,
-            "deadzone": deadzone,
             "fullscreen": fullscreen
         }, settings, indent=4
     )
