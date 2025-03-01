@@ -1,7 +1,10 @@
 {
     "overworld": 2136,
-    "title": 3736,
-    "dead": false,
+    "overworldfast": 1611,
     "star": true,
+    "starfast": true,
+    "title": 3736,
+    "hurry": false,
+    "dead": false,
     "gameover": false
 }

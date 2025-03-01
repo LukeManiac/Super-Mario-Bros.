@@ -1,10 +1,8 @@
 {
-    "upside_down_mario": false,
-    "upside_down_enemies": false,
     "moonwalking_mario": false,
     "moonwalking_enemies": false,
     "inverted_block_bounce": false,
-    "inverted_colors": false,
     "infinite_fireballs": true,
-    "infinite_lives": true
+    "infinite_lives": true,
+    "infinite_time": true
 }
