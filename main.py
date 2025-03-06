@@ -36,6 +36,9 @@ def nand(*conditions):
 def nor(*conditions):
     return not any(conditions)
 
+def xor(a, b):
+    return (a or b) and not (a and b)
+
 def get_first_chars(string, chars):
     return string[:chars]
 
@@ -1196,7 +1199,7 @@ class Goomba:
 
     def draw(self):
         image = pygame.transform.rotate(self.sprite.subsurface(self.sprites[self.spriteset][self.frame_index]), self.angle)
-        image = pygame.transform.flip(image, (self.speedx > 0 and not self.shotted) ^ nitpicks["moonwalking_enemies"], False)
+        image = pygame.transform.flip(image, xor((self.speedx > 0 and not self.shotted), nitpicks["moonwalking_enemies"]), False)
         screen.blit(image, image.get_rect(center=(self.x - camera.x + 8, self.y - camera.y + 7)).topleft)
 
 class Castle:
@@ -1701,8 +1704,8 @@ class Player:
     def draw(self):
         if self.can_draw:
             sprite = self.spritesheet.subsurface(self.sprites[self.size][self.anim_state - 1])
-            sprite = pygame.transform.flip(sprite, (not self.facing_right) ^ nitpicks["moonwalking_mario"], False)
-            draw_x = self.rect.x - camera.x - 4 + (((1 if self.character == "mario" else 2 if self.character == "luigi" else 0) if self.anim_state == 7 + self.run_frames + self.walk_frames or self.anim_state == 8 + self.run_frames + self.walk_frames or self.anim_state == 14 + self.run_frames + self.walk_frames * 2 or self.anim_state == 15 + self.run_frames + self.walk_frames * 2 else 0) * (1 if (not self.facing_right) ^ nitpicks["moonwalking_mario"] else -1))
+            sprite = pygame.transform.flip(sprite, xor((not self.facing_right), nitpicks["moonwalking_mario"]), False)
+            draw_x = self.rect.x - camera.x - 4 + (((1 if self.character == "mario" else 2 if self.character == "luigi" else 0) if self.anim_state == 7 + self.run_frames + self.walk_frames or self.anim_state == 8 + self.run_frames + self.walk_frames or self.anim_state == 14 + self.run_frames + self.walk_frames * 2 or self.anim_state == 15 + self.run_frames + self.walk_frames * 2 else 0) * (1 if xor((not self.facing_right), nitpicks["moonwalking_mario"]) else -1))
             draw_y = self.rect.y - camera.y + self.rect.height - 33
             screen.blit(sprite, (draw_x, draw_y))
 
