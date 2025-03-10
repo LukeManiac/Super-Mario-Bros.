@@ -14,12 +14,12 @@ def load_asset(asset):
 
 def load_background(background):
     return pygame.image.load(load_asset(f"bg_{background}.png")).convert_alpha()
-    
-def load_sprite(sprite):
-    return pygame.image.load(load_asset(f"spr_{sprite}.png")).convert_alpha()
 
 def load_sound(sound):
     return pygame.mixer.Sound(load_asset(f"snd_{sound}.wav"))
+    
+def load_sprite(sprite):
+    return pygame.image.load(load_asset(f"spr_{sprite}.png")).convert_alpha()
     
 def range_number(num, minval, maxval):
     return min(max(num, minval), maxval)
@@ -38,12 +38,6 @@ def nor(*conditions):
 
 def xor(a, b):
     return (a or b) and not (a and b)
-
-def get_first_chars(string, chars):
-    return string[:chars]
-
-def get_last_chars(string, chars):
-    return string[-chars:]
 
 def load_course():
     with open(f"{main_directory}/courses/{world}-{course}.json") as file:
@@ -70,10 +64,6 @@ def create_course(data):
             globals()[key] = value
 
     tiles = []
-
-    for i in range(SCREEN_HEIGHT // 16):
-        tiles.append(globals()["Ground"](-1, i - 1))
-        tiles.append(globals()["Ground"](data["width"], i - 1))
 
     if "tiles" in data and isinstance(data["tiles"], dict):
         for class_name, params_list in data["tiles"].items():
@@ -606,32 +596,37 @@ class Tile:
         self.item_spawned = False
         self.item_sound = None if self.item == CoinAnimation else item_sound
         self.player = None
+        self.coin_block_timer = 0
+        self.coins = 0
 
     def update(self):
+        if self.coins > 0 and not self.item_spawned:
+            self.item_sound = None
+            self.coin_block_timer += 1/FPS
+        
         if self.bouncing:
             if self.item is not None:
-                self.bonk_bounce = False
-                self.hit = True
-                self.image = load_sprite("blockhit")
-                self.cols = 1
-                self.frame_index = 0
-                if not self.item_spawned:
+                if self.item_spawned:
+                    self.bonk_bounce = False
+                    self.hit = True
+                    self.image = load_sprite("blockhit")
+                    self.cols = 1
+                    self.frame_index = 0
+                    self.item = None
+                else:
                     if self.img == "hiddenblock":
                         self.left_collide = True
                         self.right_collide = True
                         self.top_collide = True
                         self.bottom_collide = True
-                    if self.player.size == 0:
-                        if self.item == FireFlower:
-                            self.item = Mushroom
-                    else:
-                        if self.item == Mushroom:
-                            self.item = FireFlower
-                    if self.item == CoinAnimation:
-                        particles.append(self.item(self.og_x, self.og_y - (0.625 if self.item_spawn_anim else 1), spriteset=self.spriteset, sprout=self.item_spawn_anim))
-                    else:
-                        items.append(self.item(self.og_x, self.og_y - (0.625 if self.item_spawn_anim else 1), spriteset=self.spriteset, sprout=self.item_spawn_anim))
-                    self.item_spawned = True
+                    if self.item in [Mushroom, FireFlower]:
+                        self.item = Mushroom if self.player.size == 0 else FireFlower
+                    if not str(self.item) == "MultiCoin":
+                        self.item_spawned = True
+                        if self.item == CoinAnimation:
+                            particles.append(CoinAnimation(self.og_x, self.og_y - 1, spriteset=self.spriteset, sprout=False))
+                        else:
+                            items.append(self.item(self.og_x, self.og_y - (0.625 if self.item_spawn_anim else 1), spriteset=self.spriteset, sprout=self.item_spawn_anim))
                     if self.item_sound is not None:
                         sound_player.play_sound(self.item_sound)
             self.y_offset += self.bounce_speed
@@ -991,8 +986,8 @@ class Star:
 
 class Fireball:
     def __init__(self, player):
-        self.x = player.rect.centerx - player.rect.width / 2
-        self.y = player.rect.bottom - player.rect.width - 8
+        self.x = player.rect.centerx - player.rect.width + 2
+        self.y = player.rect.bottom - player.rect.height
         self.bounce = 2.5
         self.speedx = RUN_SPEED * (1.625 if player.facing_right else -1.625)
         self.speedy = self.bounce * (-1 if player.up else 1)
@@ -1170,7 +1165,7 @@ class Goomba:
         self.shotted = True
         self.stomped = False
         self.speedx = 2 if self.speedx < 0 else -2
-        self.speedy = -math.pi * 2
+        self.speedy = -math.pi
 
         if culprit:
             try:
@@ -1244,7 +1239,7 @@ class Player:
         self.run_lock = False
         self.img_width, self.img_height = self.spritesheet.get_size()
         self.rect = pygame.Rect(x, y, self.img_width, self.img_height)
-        self.sprites = [[pygame.Rect(x * 20, y * 34, 20, 34) for x in range(self.img_width // 20)] for y in range(self.img_height // 34)]
+        self.sprites = [[pygame.Rect(x * 20, y * 35, 20, 35) for x in range(self.img_width // 20)] for y in range(self.img_height // 35)]
         self.size = size
         self.walk_cutscene = walk_cutscene
         self.controls = [controls, controls2, controls3, controls4][player_number - 1]
@@ -1493,9 +1488,9 @@ class Player:
                 if self.rect.x <= camera.x and ((self.speedx < 0 and not self.facing_right) or (self.speedx < 0 and self.facing_right)):
                     self.speedx = 0
 
-            if self.rect.left >= camera.x + SCREEN_WIDTH:
-                self.rect.left = camera.x + SCREEN_WIDTH
-                if self.rect.x >= camera.x + SCREEN_WIDTH and ((self.speedx > 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)):
+            if self.rect.right >= camera.x + SCREEN_WIDTH:
+                self.rect.right = camera.x + SCREEN_WIDTH
+                if self.rect.x >= camera.x + SCREEN_WIDTH - self.rect.width and ((self.speedx > 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)):
                     self.speedx = 0
 
             if self.rect.top < camera.y:
@@ -1560,6 +1555,10 @@ class Player:
                                     tile.player = self
                                 if not self.size == 0:
                                     tile.break_block()
+                                if str(tile.item) == "MultiCoin":
+                                    tile.coins += 1
+                                    tile.item_spawned = tile.coin_block_timer >= 5 or tile.coins >= 10
+                                    particles.append(CoinAnimation(tile.og_x, tile.og_y - 1, spriteset=tile.spriteset, sprout=False))
 
             if self.size_change:
                 if self.can_control:
@@ -1706,7 +1705,7 @@ class Player:
             sprite = self.spritesheet.subsurface(self.sprites[self.size][self.anim_state - 1])
             sprite = pygame.transform.flip(sprite, xor((not self.facing_right), nitpicks["moonwalking_mario"]), False)
             draw_x = self.rect.x - camera.x - 4 + (((1 if self.character == "mario" else 2 if self.character == "luigi" else 0) if self.anim_state == 7 + self.run_frames + self.walk_frames or self.anim_state == 8 + self.run_frames + self.walk_frames or self.anim_state == 14 + self.run_frames + self.walk_frames * 2 or self.anim_state == 15 + self.run_frames + self.walk_frames * 2 else 0) * (1 if xor((not self.facing_right), nitpicks["moonwalking_mario"]) else -1))
-            draw_y = self.rect.y - camera.y + self.rect.height - 33
+            draw_y = self.rect.y - camera.y + self.rect.height - 34
             screen.blit(sprite, (draw_x, draw_y))
 
             if self.star:
@@ -1832,6 +1831,7 @@ bgm_player = BGMPlayer()
 sound_player = SFXPlayer()
 title_ground = TitleGround()
 background_manager = Background()
+logo = Logo()
 tiles = []
 pipe_markers = []
 items = []
@@ -1866,8 +1866,6 @@ fade_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
 a = 255
 fade_in = False
 fade_out = False
-
-logo = Logo()
 
 selected_menu_index = 0
 pause_menu_index = 0
