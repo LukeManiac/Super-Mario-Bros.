@@ -1,4 +1,6 @@
 {
+    "quad_width": 20,
+    "quad_height": 35,
     "mario": {
         "walk_frames": 6,
         "run_frames": 3,

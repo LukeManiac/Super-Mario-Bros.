@@ -1,4 +1,4 @@
-import pygame, json, math
+import pygame, json, math, numpy
 from os.path import dirname, abspath, exists, getsize
 
 pygame.init()
@@ -9,8 +9,11 @@ global main_directory, world, course
 main_directory = dirname(abspath(__file__))
 infinity = float("inf")
 
+def load_local_file(file):
+    return f"{main_directory}/{file}"
+
 def load_asset(asset):
-    return f"{main_directory}/assets/{asset}"
+    return load_local_file(f"assets/{asset}")
 
 def load_background(background):
     return pygame.image.load(load_asset(f"bg_{background}.png")).convert_alpha()
@@ -28,7 +31,7 @@ def count_list_items(array):
     return range(len(array))
 
 def format_number(num, digits):
-    return f"{num:0{digits}d}" if num < 1000 else num
+    return f"{num:0{digits}d}" if num < (10 ** digits) else num
 
 def nand(*conditions):
     return not all(conditions)
@@ -40,7 +43,7 @@ def xor(a, b):
     return (a or b) and not (a and b)
 
 def load_course():
-    with open(f"{main_directory}/courses/{world}-{course}.json") as file:
+    with open(load_local_file(f"courses/{world}-{course}.json")) as file:
         globals()["course_data"] = json.load(file)
 
 def create_course(data):
@@ -123,53 +126,6 @@ def create_course(data):
 
         globals()[category] = object_list
 
-def create_text(text, position, color=(255, 255, 255), alignment="left", stickxtocamera=False, stickytocamera=False, scale=1):
-    char_offset = 0
-    line_offset = 0
-    lines = text.split("\n")
-    x, y = position
-    rendered_lines = []
-
-    if stickxtocamera:
-        x += camera.x
-
-    if stickytocamera:
-        y += camera.y
-
-    max_line_width = 0
-
-    for line in lines:
-        line_width = sum(
-            int(font.render(char, True, color).get_width() * scale) + char_offset for char in line
-        )
-        max_line_width = max(max_line_width, line_width)
-
-    for i, line in enumerate(lines):
-        rendered_line = []
-        offset_x = 0
-
-        for char in line:
-            char_surface = font.render(char, True, color)
-            if scale != 1.0:
-                char_surface = pygame.transform.scale(
-                    char_surface,
-                    (int(char_surface.get_width() * scale), int(char_surface.get_height() * scale))
-                )
-            rendered_line.append((char_surface, offset_x))
-            offset_x += char_surface.get_width() + char_offset
-
-        rendered_lines.append((rendered_line, y + i * (int(font.get_height() * scale) + line_offset)))
-
-    for rendered_line, line_y in rendered_lines:
-        start_x = x - camera.x
-        if alignment == "center":
-            start_x -= max_line_width // 2
-        elif alignment == "right":
-            start_x -= max_line_width
-
-        for char_surface, char_x in rendered_line:
-            screen.blit(char_surface, (start_x + char_x, line_y))
-
 def create_pipe(x, y, length=2, can_enter=False, new_zone=None, pipe_dir="up", color=1):
     color -= 1
     pipes = []
@@ -198,6 +154,20 @@ def create_pipe(x, y, length=2, can_enter=False, new_zone=None, pipe_dir="up", c
                 pipe_markers.append(PipeMarker(px + (0.5 if pipe_dir == "up" or pipe_dir == "down" else 0), py + (1 if pipe_dir == "left" or pipe_dir == "right" else 0), pipe_dir, new_zone))
 
     return pipes
+
+def recolor_surface(surface, old_color, new_color):
+    recolored = surface.copy()
+    pixel_array = pygame.PixelArray(recolored)
+
+    for x in range(recolored.get_width()):
+        for y in range(recolored.get_height()):
+            pixel = recolored.unmap_rgb(pixel_array[x, y])
+            if pixel[:3] == tuple(old_color):
+                new_pixel = recolored.map_rgb([*new_color, pixel[3]])
+                pixel_array[x, y] = new_pixel
+
+    del pixel_array
+    return recolored
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 640, 400
 WALK_SPEED = 2.5
@@ -247,15 +217,30 @@ class PipeMarker:
 
 class SFXPlayer:
     def __init__(self):
+        pygame.mixer.init()
         self.sounds = {}
         self.paused = False
 
-    def play_sound(self, sound):
-        self.sounds[sound] = sound
-        if sound in self.sounds:
-            self.sounds[sound].set_volume(snd_vol)
-            self.sounds[sound].stop()
-            self.sounds[sound].play()
+    def play_sound(self, sound, pitch=0):
+        if sound not in self.sounds:
+            self.sounds[sound] = sound
+
+        pitched_sound = self.change_pitch(self.sounds[sound], pitch)
+        pitched_sound.set_volume(snd_vol)
+        pitched_sound.stop()
+        pitched_sound.play()
+
+    def change_pitch(self, sound, semitones):
+        return sound if semitones == 0 else pygame.sndarray.make_sound(
+            pygame.sndarray.array(sound)[
+                numpy.round(
+                    numpy.linspace(
+                        0, len(pygame.sndarray.array(sound)) - 1,
+                        int(len(pygame.sndarray.array(sound)) / (2 ** (semitones / 12)))
+                    )
+                ).astype(int)
+            ]
+        )
 
     def stop_sound(self, sound):
         if sound in self.sounds:
@@ -275,8 +260,8 @@ class SFXPlayer:
         for sound_name in self.sounds:
             self.sounds[sound_name].set_volume(volume)
 
-    def is_playing(self, sound):
-        return sound.get_num_channels() > 0
+    def is_playing(self, *sounds):
+        return any(sound.get_num_channels() > 0 for sound in sounds)
 
 class BGMPlayer:
     def __init__(self):
@@ -324,6 +309,62 @@ class BGMPlayer:
     def is_playing(self, music):
         return pygame.mixer.music.get_busy() and self.music == load_asset(f"bgm_{music}.ogg")
 
+class Text:
+    def __init__(self):
+        self.font_size = 16
+        self.font = pygame.font.Font(load_local_file("font.ttf"), self.font_size)
+
+    def create_text(self, text, position, color=(255, 255, 255), alignment="left", stickxtocamera=False, stickytocamera=False, scale=1):
+        char_offset = 0
+        line_offset = 0
+        lines = text.split("\n")
+        x, y = position
+        rendered_lines = []
+
+        if stickxtocamera and camera:
+            x += camera.x
+
+        if stickytocamera and camera:
+            y += camera.y
+
+        max_line_width = 0
+
+        for line in lines:
+            line_width = sum(
+                int(self.font.render(char, True, color).get_width() * scale) + char_offset for char in line
+            )
+            max_line_width = max(max_line_width, line_width)
+
+        for i, line in enumerate(lines):
+            rendered_line = []
+            offset_x = 0
+
+            for char in line:
+                char_surface = self.font.render(char, True, color)
+                if scale != 1.0:
+                    char_surface = pygame.transform.scale(
+                        char_surface,
+                        (int(char_surface.get_width() * scale), int(char_surface.get_height() * scale))
+                    )
+                rendered_line.append((char_surface, offset_x))
+                offset_x += char_surface.get_width() + char_offset
+
+            rendered_lines.append((rendered_line, y + i * (int(self.font.get_height() * scale) + line_offset)))
+
+        for rendered_line, line_y in rendered_lines:
+            start_x = x
+            if camera:
+                start_x -= camera.x
+
+            if alignment == "center":
+                start_x -= max_line_width // 2
+            elif alignment == "right":
+                start_x -= max_line_width
+
+            for char_surface, char_x in rendered_line:
+                if screen:
+                    screen.blit(char_surface, (start_x + char_x, line_y))
+
 class Background:
     def __init__(self):
         self.bg_image = None
@@ -360,15 +401,9 @@ class Camera:
         self.x = 0
         self.y = 0
 
-    def update(self, players, max_x, max_y):
-        self.x = range_number(
-            sum(player.rect.x + player.rect.width for player in players) / len(players) - SCREEN_WIDTH // 2,
-            0, (max_x if max_x is not None else infinity)
-        )
-        self.y = range_number(
-            sum(player.rect.y + player.rect.height for player in players) / len(players) - SCREEN_HEIGHT // 2,
-            0, (max_y if max_y is not None else infinity)
-        )
+    def update(self, players, max_x=None):
+        self.x = range_number(sum(player.rect.x + player.rect.width for player in players) / len(players) - SCREEN_WIDTH // 2, 0, (max_x if max_x is not None else infinity))
+        self.y = range_number(sum(player.rect.y + player.rect.height for player in players) / len(players) - SCREEN_HEIGHT // 2, 0, 0)
 
 class Logo:
     def __init__(self):
@@ -400,17 +435,8 @@ class Logo:
 
 class TitleGround:
     def __init__(self):
-        self.y = SCREEN_HEIGHT - 8
+        self.y = SCREEN_HEIGHT - 24
         self.sprite = load_sprite("ground")
-
-    def check_collision(self, obj):
-        obj.on_ground = obj.rect.bottom >= self.y
-        if obj.rect.bottom >= self.y:
-            obj.rect.bottom = self.y
-            obj.y = self.y - 16
-            
-            if obj.speedy > 0:
-                obj.speedy = 0
 
     def draw(self):
         offset_x = -camera.x % 16
@@ -422,24 +448,10 @@ class PowerMeter:
     def __init__(self, player):
         self.frames = [pygame.Rect(0, i * 7, 64, 7) for i in range(8)]
         self.player = player
-        self.spritesheet = load_sprite("powermeter")
-        self.spritesheet = self.recolor_spritesheet()
+        self.spritesheet = recolor_surface(load_sprite("powermeter"), [255, 255, 255], self.player.color)
         self.current_frame = 0
         self.frame_swap_timer = 0
         self.swap_state = False
-
-    def recolor_spritesheet(self):
-        recolored = self.spritesheet.copy()
-        pixel_array = pygame.PixelArray(recolored)
-
-        for x in range(recolored.get_width()):
-            for y in range(recolored.get_height()):
-                pixel = recolored.unmap_rgb(pixel_array[x, y])
-                if pixel[:3] == (255, 255, 255):
-                    pixel_array[x, y] = recolored.map_rgb([*self.player.color, pixel[3]])
-
-        del pixel_array
-        return recolored
 
     def update(self):
         if self.player.pspeed:
@@ -449,11 +461,11 @@ class PowerMeter:
                 self.frame_swap_timer = 0
             self.current_frame = 7 if self.swap_state else 6
         else:
-            self.current_frame = min(self.player.run_timer // int(round(MAX_RUN_TIMER / 7.5)), 7)
+            self.current_frame = min(int(self.player.run_timer) // int(round(MAX_RUN_TIMER / 7.5)), 7)
             self.frame_swap_timer = 0
 
     def draw(self):
-        screen.blit(self.spritesheet.subsurface(self.frames[self.current_frame]), (56, 24 + self.player.player_number * 16))
+        screen.blit(self.spritesheet.subsurface(self.frames[self.current_frame]), (48 + 8 * len(str(self.player.lives)), 24 + self.player.player_number * 16))
 
 class Score:
     def __init__(self, x, y, points=100):
@@ -462,7 +474,8 @@ class Score:
         self.frame_index = {100: 0, 200: 1, 400: 2, 800: 3, 1000: 4, 2000: 5, 4000: 6, 8000: 7, 10000: 8}.get(points, -1)
         self.image = load_sprite("score")
         self.dt = 0
-        globals()["score"] += points
+        if not points == 10000:
+            globals()["score"] += points
 
     def update(self):
         self.dt += 1
@@ -609,6 +622,7 @@ class Tile:
                 if self.item_spawned:
                     self.bonk_bounce = False
                     self.hit = True
+                    self.breakable = False
                     self.image = load_sprite("blockhit")
                     self.cols = 1
                     self.frame_index = 0
@@ -753,7 +767,7 @@ class BrickDebris:
             screen.blit(self.rotated_image, (self.x - camera.x, self.y - camera.y))
 
 class Mushroom:
-    def __init__(self, x, y, sprout=False, **kwargs):
+    def __init__(self, x, y, sprout=False, spriteset=1):
         self.x, self.y = x * 16, y * 16 + 8 + (8 if sprout else 0)
         self.sprite = load_sprite("mushroom")
         self.speedx = 0 if sprout else 1
@@ -763,6 +777,8 @@ class Mushroom:
         self.size = 1
         self.sprouting = sprout
         self.sprout_timer = 0
+        self.spriteset = spriteset - (0 if sprout else 1)
+        self.sprites = [pygame.Rect(0, 16 * i, 16, 16) for i in range(4)]
 
     def update(self):
         if self.sprouting:
@@ -820,21 +836,14 @@ class Mushroom:
         return not ((self.y < camera.y + SCREEN_HEIGHT + 16) or (self.y + self.rect.height < camera.y + SCREEN_HEIGHT + 16))
 
     def draw(self):
-        screen.blit(self.sprite, (self.x - camera.x, self.y - camera.y))
+        screen.blit(self.sprite.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y))
 
 class OneUp(Mushroom):
     def __init__(self, x, y, sprout=False, spriteset=1):
-        self.x, self.y = x * 16, y * 16 + 8 + (8 if sprout else 0)
-        self.sprite = load_sprite("oneup")
-        self.speedx = 0 if sprout else 2
-        self.speedy = -0.5 if sprout else 0
-        self.rect = pygame.Rect(self.x, self.y, 16, 16)
-        self.gravity = 0.25
+        super().__init__(x, y, sprout, spriteset)
         self.lives = 1
-        self.sprouting = sprout
-        self.sprout_timer = 0
+        self.sprite = load_sprite("oneup")
         self.sprites = [pygame.Rect(0, 16 * i, 16, 16) for i in range(4)]
-        self.spriteset = spriteset - (0 if sprout else 1)
 
     def update(self):
         super().update()
@@ -846,7 +855,7 @@ class OneUp(Mushroom):
         return super().below_camera()
 
     def draw(self):
-        screen.blit(self.sprite.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y))
+        super().draw()
 
 class FireFlower:
     def __init__(self, x, y, sprout=False, spriteset=1):
@@ -986,8 +995,8 @@ class Star:
 
 class Fireball:
     def __init__(self, player):
-        self.x = player.rect.centerx - player.rect.width + 2
-        self.y = player.rect.bottom - player.rect.height
+        self.x = player.rect.left
+        self.y = player.rect.top
         self.bounce = 2.5
         self.speedx = RUN_SPEED * (1.625 if player.facing_right else -1.625)
         self.speedy = self.bounce * (-1 if player.up else 1)
@@ -1005,8 +1014,8 @@ class Fireball:
     def update(self):
         if self.destroyed:
             self.frame_timer += 1
-            self.frame_index = math.floor(min(self.frame_timer / 5, 3))
-            if self.frame_timer >= 20:
+            self.frame_index = math.floor(min(self.frame_timer / 4, 3))
+            if self.frame_timer >= 15:
                 [fireballs, fireballs2, fireballs3, fireballs4][self.player.player_number - 1].remove(self)
         else:
             self.angle -= 12 * (-1 if self.speedx < 0 else 1)
@@ -1044,11 +1053,14 @@ class Fireball:
                         return
                     break
 
+            self.rect.topleft = (self.x, self.y)
+
             for enemy in enemies:
                 if self.rect.colliderect(enemy.rect):
                     self.destroy()
                     enemy.shot(self)
                     overlays.append(Score(self.x - camera.x, self.y - camera.y))
+                    sound_player.play_sound(shot_sound)
 
             self.rect.topleft = (self.x, self.y)
 
@@ -1158,7 +1170,6 @@ class Goomba:
         self.stomped = True
         self.shotted = False
         self.dt = 0
-        sound_player.play_sound(stomp_sound)
 
     def shot(self, culprit=None):
         self.rect = pygame.Rect(0, 0, 0, 0)
@@ -1178,8 +1189,6 @@ class Goomba:
                     self.speedx = 2
                 elif culprit.rect.x > self.x:
                     self.speedx = -2
-
-        sound_player.play_sound(shot_sound)
 
     def is_visible(self):
         return (
@@ -1209,13 +1218,14 @@ class Castle:
 
 class Player:
     def __init__(self, x, y, lives=3, size=0, character="mario", controls_enabled=True, walk_cutscene=False, player_number=1):
-        with open(f"{main_directory}/character_properties.json") as file:
+        with open(load_local_file("character_properties.json")) as file:
             self.properties = json.load(file)
         self.walk_frames = self.properties[character]["walk_frames"]
         self.run_frames = self.properties[character]["run_frames"]
         self.acceleration = self.properties[character]["acceleration"]
         self.max_jump = self.properties[character]["max_jump"]
         self.color = self.properties[character]["color"]
+        self.quad_width, self.quad_height = self.properties["quad_width"], self.properties["quad_height"]
         self.spritesheet = load_sprite(character)
         self.controls_enabled = controls_enabled
         self.can_control = controls_enabled
@@ -1239,7 +1249,18 @@ class Player:
         self.run_lock = False
         self.img_width, self.img_height = self.spritesheet.get_size()
         self.rect = pygame.Rect(x, y, self.img_width, self.img_height)
-        self.sprites = [[pygame.Rect(x * 20, y * 35, 20, 35) for x in range(self.img_width // 20)] for y in range(self.img_height // 35)]
+        self.sprites = [
+            [
+                pygame.Rect(
+                x * self.quad_width,
+                y * self.quad_height,
+                self.quad_width,
+                self.quad_height
+                )
+            for x in range(self.img_width // self.quad_width)
+            ]
+            for y in range(self.img_height // self.quad_height)
+        ]
         self.size = size
         self.walk_cutscene = walk_cutscene
         self.controls = [controls, controls2, controls3, controls4][player_number - 1]
@@ -1288,16 +1309,19 @@ class Player:
                 player.lives += 1
         else:
             self.lives += 1
+        if not sound_player.is_playing(oneup_sound):
+            sound_player.play_sound(oneup_sound)
 
     def update_hitbox(self):
         prev_bottom = self.rect.bottom
-        new_width, new_height = (12, 16 if self.size == 0 else 24) if not self.down else (12, 8 if self.size == 0 else 16)
+        new_width, new_height = (12, 8 if self.size == 0 else 16) if self.down else (12, 16 if self.size == 0 else 24)
         self.rect.width, self.rect.height = new_width, new_height
         self.rect.bottom = prev_bottom
 
     def update(self):
         if self.dead:
             if self.dead_timer == 0:
+                self.size = 0
                 self.piping = False
                 self.run_timer = 0
                 self.pspeed = False
@@ -1312,7 +1336,6 @@ class Player:
                     bgm_player.stop_music()
                     sound_player.stop_all_sounds()
                 sound_player.play_sound(dead_sound)
-            self.size = 0
             self.anim_state = self.walk_frames * 2 + self.run_frames + 17
             self.dead_timer += 1
             if self.dead_timer >= 30:
@@ -1462,7 +1485,7 @@ class Player:
                     self.jump_speedx = 1 if self.stomp_jump else abs(self.speedx)
                     if not self.stomp_jump:
                         sound_player.play_sound(jump_sound if self.size == 0 else jumpbig_sound)
-                self.max_speedx_jump = (self.max_jump + (2 if self.pspeed else 1)) if self.jump_speedx >= 1 else self.max_jump
+                self.max_speedx_jump = (self.max_jump + (2 if self.pspeed else 1) / 2) if self.jump_speedx >= 1 else self.max_jump
                 self.speedy = max(self.speedy - self.max_speedx_jump, -self.max_speedx_jump)
                 self.jump_timer += 1
             elif not self.jump:
@@ -1479,9 +1502,9 @@ class Player:
                     if abs(self.speedx) >= RUN_SPEED:
                         self.run_timer = range_number(self.run_timer + (3 if self.star else 1), MIN_RUN_TIMER, MAX_RUN_TIMER)
                     else:
-                        self.run_timer = range_number(self.run_timer - (3 if self.star else 1), MIN_RUN_TIMER, MAX_RUN_TIMER)
+                        self.run_timer = range_number(self.run_timer - (3 if self.star else 0.5), MIN_RUN_TIMER, MAX_RUN_TIMER)
                 elif not self.run_timer == MAX_RUN_TIMER:
-                    self.run_timer = range_number(self.run_timer - (3 if self.star else 1), MIN_RUN_TIMER, MAX_RUN_TIMER)
+                    self.run_timer = range_number(self.run_timer - (3 if self.star else 0.5), MIN_RUN_TIMER, MAX_RUN_TIMER)
 
             if self.rect.left <= camera.x:
                 self.rect.left = camera.x
@@ -1518,8 +1541,32 @@ class Player:
             self.rect.x += self.speedx
             self.rect.y += self.speedy
             self.on_ground = False
-            if title_ground is not None:
-                title_ground.check_collision(self)
+
+            if self.size_change:
+                if self.can_control:
+                    self.old_controls = [self.left, self.right, self.up, self.down, self.run, self.jump, self.speedx, self.speedy, self.jump_timer, self.run_timer, self.fall_timer, self.falling, self.fire_timer, self.can_draw]
+                self.can_control = False
+                self.left = False
+                self.right = False
+                self.up = False
+                self.down = False
+                self.run = False
+                self.jump = False
+                self.speedx = 0
+                self.speedy = 0
+                self.jump_timer = 0
+                self.run_timer = 0
+                self.fall_timer = 0
+                self.can_draw = True
+                self.falling = False
+                self.fire_timer = 0
+                if self.size_change_timer % 5 == 0:
+                    self.size = self.size_change.pop(0)
+                self.size_change_timer += 1
+            else:
+                if self.controls_enabled and not self.can_control:
+                    self.left, self.right, self.up, self.down, self.run, self.jump, self.speedx, self.speedy, self.jump_timer, self.run_timer, self.fall_timer, self.falling, self.fire_timer, self.can_draw = self.old_controls
+                self.can_control = True
 
             for tile in tiles:
                 if tile.broken:
@@ -1560,41 +1607,15 @@ class Player:
                                     tile.item_spawned = tile.coin_block_timer >= 5 or tile.coins >= 10
                                     particles.append(CoinAnimation(tile.og_x, tile.og_y - 1, spriteset=tile.spriteset, sprout=False))
 
-            if self.size_change:
-                if self.can_control:
-                    self.old_controls = [self.left, self.right, self.up, self.down, self.run, self.jump, self.speedx, self.speedy, self.jump_timer, self.run_timer, self.fall_timer, self.falling, self.fire_timer, self.can_draw]
-                self.can_control = False
-                self.left = False
-                self.right = False
-                self.up = False
-                self.down = False
-                self.run = False
-                self.jump = False
-                self.speedx = 0
-                self.speedy = 0
-                self.jump_timer = 0
-                self.run_timer = 0
-                self.fall_timer = 0
-                self.can_draw = True
-                self.falling = False
-                self.fire_timer = 0
-                if self.size_change_timer % 5 == 0:
-                    self.size = self.size_change.pop(0)
-                self.size_change_timer += 1
-            else:
-                if self.controls_enabled and not self.can_control:
-                    self.left, self.right, self.up, self.down, self.run, self.jump, self.speedx, self.speedy, self.jump_timer, self.run_timer, self.fall_timer, self.falling, self.fire_timer, self.can_draw = self.old_controls
-                self.can_control = True
-
             for enemy in enemies:
                 if self.rect.colliderect(enemy.rect) and not self.size_change:
                     if self.star:
                         enemy.shot(self)
                         overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, [100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000][self.star_combo]))
-                        self.star_combo = min(self.star_combo + 1, 8)
                         if self.star_combo == 8:
-                            sound_player.play_sound(oneup_sound)
                             self.add_life()
+                        sound_player.play_sound(shot_sound, self.star_combo * 2)
+                        self.star_combo = min(self.star_combo + 1, 8)
                     else:
                         if self.speedy > 0 and self.rect.bottom - enemy.rect.top < 8:
                             enemy.stomp()
@@ -1604,10 +1625,10 @@ class Player:
                             self.on_ground = False
                             self.fall_timer = self.fall_duration
                             overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, [100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000][self.stomp_combo]))
-                            self.stomp_combo = min(self.stomp_combo + 1, 8)
                             if self.stomp_combo == 8:
-                                sound_player.play_sound(oneup_sound)
                                 self.add_life()
+                            sound_player.play_sound(stomp_sound, self.stomp_combo)
+                            self.stomp_combo = min(self.stomp_combo + 1, 8)
                         elif not self.shrunk:
                             if self.size == 0:
                                 self.dead_speed = -5
@@ -1652,7 +1673,7 @@ class Player:
 
             self.rect.y = max(self.rect.y, camera.y)
 
-            if self.rect.top >= SCREEN_HEIGHT:
+            if self.rect.top >= SCREEN_HEIGHT + 16:
                 self.dead = True
                 self.dead_speed = 0
 
@@ -1704,7 +1725,7 @@ class Player:
         if self.can_draw:
             sprite = self.spritesheet.subsurface(self.sprites[self.size][self.anim_state - 1])
             sprite = pygame.transform.flip(sprite, xor((not self.facing_right), nitpicks["moonwalking_mario"]), False)
-            draw_x = self.rect.x - camera.x - 4 + (((1 if self.character == "mario" else 2 if self.character == "luigi" else 0) if self.anim_state == 7 + self.run_frames + self.walk_frames or self.anim_state == 8 + self.run_frames + self.walk_frames or self.anim_state == 14 + self.run_frames + self.walk_frames * 2 or self.anim_state == 15 + self.run_frames + self.walk_frames * 2 else 0) * (1 if xor((not self.facing_right), nitpicks["moonwalking_mario"]) else -1))
+            draw_x = self.rect.x - camera.x - 4
             draw_y = self.rect.y - camera.y + self.rect.height - 34
             screen.blit(sprite, (draw_x, draw_y))
 
@@ -1777,8 +1798,8 @@ controls4 = {
 }
 fullscreen = False
 
-if exists(f"{main_directory}/settings.json") and not getsize(f"{main_directory}/settings.json") == 0:
-    with open(f"{main_directory}/settings.json", "r") as file:
+if exists(load_local_file("settings.json")) and not getsize(load_local_file("settings.json")) == 0:
+    with open(load_local_file("settings.json"), "r") as file:
         data = json.load(file)
         mus_vol = data.get("mus_vol", mus_vol)
         snd_vol = data.get("snd_vol", snd_vol)
@@ -1797,29 +1818,27 @@ nitpicks_list = [
     "infinite_time"
 ]
 
-if exists(f"{main_directory}/nitpicks.json"):
-    with open(f"{main_directory}/nitpicks.json", "r") as nitpicks:
+if exists(load_local_file("nitpicks.json")):
+    with open(load_local_file("nitpicks.json"), "r") as nitpicks:
         data = json.load(nitpicks)
         
     for key in nitpicks_list:
         if key not in data:
             data[key] = False
     
-with open(f"{main_directory}/nitpicks.json", "w") as nitpicks:
-    json.dump(data if exists(f"{main_directory}/nitpicks.json") else {key: False for key in nitpicks_list}, nitpicks, indent=4)
+with open(load_local_file("nitpicks.json"), "w") as nitpicks:
+    json.dump(data if exists(load_local_file("nitpicks.json")) else {key: False for key in nitpicks_list}, nitpicks, indent=4)
 
-with open(f"{main_directory}/nitpicks.json", "r") as file:
+with open(load_local_file("nitpicks.json"), "r") as file:
     nitpicks = json.load(file)
 
-with open(f"{main_directory}/loop_points.json") as file:
+with open(load_local_file("loop_points.json")) as file:
     music_table = json.load(file)
 
 running = True
 centerx = SCREEN_WIDTH / 2
 centery = SCREEN_HEIGHT / 2
-font_size = 16
 characters_table = ["mario", "luigi", "yellowtoad", "bluetoad"]
-font = pygame.font.Font(f"{main_directory}/font.ttf", font_size)
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.RESIZABLE | (pygame.FULLSCREEN if fullscreen else 0))
 clock = pygame.time.Clock()
 pygame.display.set_icon(pygame.image.load(load_asset("icon.ico")))
@@ -1831,6 +1850,7 @@ bgm_player = BGMPlayer()
 sound_player = SFXPlayer()
 title_ground = TitleGround()
 background_manager = Background()
+text = Text()
 logo = Logo()
 tiles = []
 pipe_markers = []
@@ -1910,7 +1930,7 @@ while running:
     old_mus_vol = mus_vol
     old_snd_vol = snd_vol
 
-    with open(f"{main_directory}/settings.json", "w") as settings:
+    with open(load_local_file("settings.json"), "w") as settings:
         json.dump(
             {
                 "mus_vol": mus_vol,
@@ -1968,7 +1988,7 @@ while running:
                 player_lives = []
                 hud = CoinHUD()
                 course += 1
-                if not exists(f"{main_directory}/courses/{world}-{course}"):
+                if not exists(load_local_file(f"courses/{world}-{course}")):
                     course = 1
                     world += 1
                 load_course()
@@ -2098,11 +2118,15 @@ while running:
             sound_player.play_sound(beep_sound)
         old_selected_menu_index = selected_menu_index
         
-        camera.update(intro_players, None, 15)
+        camera.update(intro_players)
         
         title_ground.draw()
 
         for player in intro_players:
+            player.rect.bottom = title_ground.y
+            player.on_ground = True
+            player.speedy = 0
+            player.fall_timer = 0
             player.draw()
             player.update()
 
@@ -2112,7 +2136,7 @@ while running:
                 
                 display_text = f"> {options[0]} <" if i == selected_menu_index else options[0]
 
-                create_text(
+                text.create_text(
                     text=display_text.upper(),
                     position=(centerx, centery * options[1]),
                     alignment="center",
@@ -2124,7 +2148,7 @@ while running:
                 
                 display_text = f"> {options[0]} <" if i == selected_menu_index else options[0]
 
-                create_text(
+                text.create_text(
                     text=display_text.upper(),
                     position=(centerx, centery * options[1]),
                     alignment="center",
@@ -2135,7 +2159,7 @@ while running:
             for i in count_list_items(menu_options):
                 options = menu_options[i]
                 if binding_key and selected_menu_index == i:
-                    create_text(
+                    text.create_text(
                         text="PRESS ESC TO CANCEL BINDING",
                         position=(centerx, centery * 1.875),
                         alignment="center",
@@ -2144,7 +2168,7 @@ while running:
                 
                 display_text = f"> {options[0]} <" if i == selected_menu_index else options[0]
 
-                create_text(
+                text.create_text(
                     text=display_text.upper(),
                     position=(centerx, centery * options[1]),
                     alignment="center",
@@ -2186,7 +2210,7 @@ while running:
 
         try:
             if not any(player.piping for player in players):
-                camera.update([player for player in players if not player.dead], x_range, 0)
+                camera.update([player for player in players if not player.dead], x_range)
         except ZeroDivisionError:
             pass
 
@@ -2200,7 +2224,8 @@ while running:
 
         for item in items[:]:
             if item.is_visible():
-                item.draw()
+                if (item.sprouting and item.sprout_timer > 0) or not item.sprouting:
+                    item.draw()
                 if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
                     item.update()
             if item.below_camera():
@@ -2255,7 +2280,7 @@ while running:
         if course_time <= 0:
             for player in players:
                 if everyone_dead:
-                    create_text(
+                    text.create_text(
                     text="TIME'S UP!",
                     position=(centerx, centery),
                     alignment="center",
@@ -2291,17 +2316,17 @@ while running:
         if all(player.dead_timer >= 60 for player in players) and not bgm_player.is_playing(dead_music):
             fade_in = True
 
-        for debris_part in debris:
+        for debris_part in debris[:]:
             debris_part.draw()
             if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
                 debris_part.update()
 
-        for particle in particles:
+        for particle in particles[:]:
             particle.draw()
             if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
                 particle.update()
 
-        for overlay in overlays:
+        for overlay in overlays[:]:
             overlay.draw()
             if not pause:
                 overlay.update()
@@ -2309,7 +2334,7 @@ while running:
         if hud:
             hud.draw()
 
-            create_text(
+            text.create_text(
                 text=f"x{hud.coins:02}",
                 position=(20, 16),
                 stickxtocamera=True,
@@ -2317,23 +2342,23 @@ while running:
                 scale=0.5
             )
 
-            create_text(
+            text.create_text(
                 text=f"{score:09}",
-                position=(632 - (len(f"{score:09}") * (font_size / 2)), 16),
+                position=(632 - (len(f"{score:09}") * (text.font_size / 2)), 16),
                 stickxtocamera=True,
                 stickytocamera=True,
                 scale=0.5
             )
 
-            create_text(
+            text.create_text(
                 text=f"{course_time:03}",
-                position=(632 - (len(f"{course_time:03}") * (font_size / 2)), 32),
+                position=(632 - (len(f"{course_time:03}") * (text.font_size / 2)), 32),
                 stickxtocamera=True,
                 stickytocamera=True,
                 scale=0.5
             )
 
-            screen.blit(load_sprite("hudclock"), (622 - (len(str(format_number(course_time, 3))) * (font_size / 2)), 32))
+            screen.blit(load_sprite("hudclock"), (622 - (len(str(format_number(course_time, 3))) * (text.font_size / 2)), 32))
 
         if players_hud:
             for player_hud in players_hud:
@@ -2342,7 +2367,7 @@ while running:
                     player_hud.update()
 
                 for player in players:
-                    create_text(
+                    text.create_text(
                         text=f"x{player.lives}",
                         position=(32, 24 + player.player_number * 16),
                         stickxtocamera=True,
@@ -2350,7 +2375,7 @@ while running:
                         scale=0.5
                     )
 
-        (sound_player.loop_sound if any(player.pspeed for player in players) and nor(sound_player.is_playing(jump_sound), sound_player.is_playing(jumpbig_sound), everyone_dead, pause, any(player.piping for player in players)) else sound_player.stop_sound)(pspeed_sound)
+        (sound_player.loop_sound if any(player.pspeed for player in players) and nor(sound_player.is_playing(jump_sound, jumpbig_sound), everyone_dead, pause, any(player.piping for player in players)) else sound_player.stop_sound)(pspeed_sound)
         (sound_player.loop_sound if any(player.skidding for player in players) and nor(everyone_dead, pause, any(player.piping for player in players)) else sound_player.stop_sound)(skid_sound)
 
         pause_menu_options = [
@@ -2366,7 +2391,7 @@ while running:
 
                 display_text = f"> {options[0]} <" if i == pause_menu_index else options[0]
 
-                create_text(
+                text.create_text(
                     text=display_text,
                     position=(centerx, centery * options[1]),
                     alignment="center",
@@ -2380,13 +2405,13 @@ while running:
     
     elif game_over:
         dt += 1
-        create_text(
+        text.create_text(
             text="GAME OVER",
             position=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2),
             alignment="center"
         )
         if dt >= 60 and not bgm_player.is_playing("gameover"):
-            create_text(
+            text.create_text(
                 text="PRESS ANY KEY TO RESTART",
                 position=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 1.75),
                 alignment="center",
@@ -2535,7 +2560,7 @@ while running:
 
 pygame.quit()
 
-with open(f"{main_directory}/settings.json", "w") as settings:
+with open(load_local_file("settings.json"), "w") as settings:
     json.dump(
         {
             "mus_vol": mus_vol,
