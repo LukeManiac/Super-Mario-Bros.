@@ -1396,7 +1396,6 @@ class Player:
         self.run_timer = 0
         self.update_hitbox()
         self.rect.y -= self.rect.height - (0 if self.size == 0 else 12)
-        self.carrying_item = False
         self.fall_timer = 0
         self.fall_duration = 0.125
         self.falling = True
@@ -1465,7 +1464,6 @@ class Player:
                     bgm_player.stop_music()
                     sound_player.stop_all_sounds()
                 sound_player.play_sound(dead_sound)
-            self.anim_state = self.walk_frames * 2 + self.run_frames + 17
             self.dead_timer += 1
             if self.dead_timer >= 30:
                 if not self.dead_music:
@@ -1563,10 +1561,10 @@ class Player:
                     self.rect.x += self.speedx
                     self.rect.y += self.speedy                
                 if abs(self.speedx) < MIN_SPEEDX:
-                    self.anim_state = self.walk_frames * 2 + self.run_frames + 18
+                    self.anim_state = self.walk_frames + self.run_frames + 10
                 else:
                     self.frame_timer += abs(self.speedx) / 1.25
-                    self.anim_state = ((12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames)
+                    self.anim_state = (4 + int(self.frame_timer // FRAME_SPEED) % self.walk_frames)
                 return
 
             if self.on_ground:
@@ -1913,29 +1911,29 @@ class Player:
 
             reset_frame_timer = True
 
-            if self.down:
-                self.anim_state = (3 if self.speedy > 0 and self.fall_timer >= self.fall_duration else 2) + (8 + self.walk_frames + self.run_frames if self.carrying_item else 0)
-            elif self.size == 2 and 0 < self.fire_timer < self.fire_duration and not self.fire_lock:
-                self.anim_state = self.walk_frames * 2 + self.run_frames + 17
-            elif self.skidding:
-                self.frame_timer = (self.frame_timer + abs(self.speedx) / 1.25) if self.carrying_item else 0
-                self.anim_state = ((12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames if self.carrying_item else 4 + self.walk_frames)
-                reset_frame_timer = False
-            elif self.speedy < 0:
-                self.anim_state = ((12 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0)) if self.carrying_item else (7 + self.run_frames if self.pspeed else 5)) + self.walk_frames
-            elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.down):
-                self.anim_state = ((13 + self.walk_frames + self.run_frames + (2 if self.pspeed else 0)) if self.carrying_item else (8 + self.run_frames if self.pspeed else 6)) + self.walk_frames
-            elif self.speedx == 0 and self.on_ground:
-                self.anim_state = (9 + self.walk_frames + self.run_frames) if self.carrying_item else 1
-                self.speedx = 0
-            elif abs(self.speedx) > MIN_SPEEDX * 2 and self.fall_timer < self.fall_duration and (not self.pspeed or self.carrying_item):
-                self.frame_timer += abs(self.speedx) / 1.25
-                self.anim_state = ((12 + self.walk_frames + self.run_frames if self.carrying_item else 4) + int(self.frame_timer // FRAME_SPEED) % self.walk_frames)
-                reset_frame_timer = False
-            elif self.pspeed and self.fall_timer < self.fall_duration and not self.carrying_item:
-                self.frame_timer += abs(self.speedx) / 1.25
-                self.anim_state = 7 + self.walk_frames + int(self.frame_timer // FRAME_SPEED) % self.run_frames
-                reset_frame_timer = False
+        if self.down:
+            self.anim_state = 3 if self.speedy > 0 and self.fall_timer >= self.fall_duration else 2
+        elif self.dead:
+            self.anim_state = self.walk_frames + self.run_frames + 9
+        elif self.size == 2 and 0 < self.fire_timer < self.fire_duration and not self.fire_lock:
+            self.anim_state = self.walk_frames + self.run_frames + 9
+        elif self.skidding:
+            self.anim_state = 4 + self.walk_frames
+        elif self.speedy < 0:
+            self.anim_state = (7 + self.run_frames if self.pspeed else 5) + self.walk_frames
+        elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.down):
+            self.anim_state = (8 + self.run_frames if self.pspeed else 6) + self.walk_frames
+        elif self.speedx == 0 and self.on_ground:
+            self.anim_state = 1
+            self.speedx = 0
+        elif abs(self.speedx) > MIN_SPEEDX * 2 and self.fall_timer < self.fall_duration and not self.pspeed:
+            self.frame_timer += abs(self.speedx) / 1.25
+            self.anim_state = 4 + int(self.frame_timer // FRAME_SPEED) % self.walk_frames
+            reset_frame_timer = False
+        elif self.pspeed and self.fall_timer < self.fall_duration:
+            self.frame_timer += abs(self.speedx) / 1.25
+            self.anim_state = 7 + self.walk_frames + int(self.frame_timer // FRAME_SPEED) % self.run_frames
+            reset_frame_timer = False
 
             if reset_frame_timer:
                 self.frame_timer = 0
