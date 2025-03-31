@@ -413,7 +413,6 @@ class Camera:
 
     def update(self, players, max_x=None):
         self.x = range_number(sum(player.rect.x + player.rect.width for player in players) / len(players) - SCREEN_WIDTH // 2, 0, (max_x if max_x is not None else infinity))
-        self.y = range_number(sum(player.rect.y + player.rect.height for player in players) / len(players) - SCREEN_HEIGHT // 2, 0, 0)
 
 class Logo:
     def __init__(self):
