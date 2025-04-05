@@ -2688,8 +2688,10 @@ while running:
         if course_time <= 100 and not fast_music:
             if not main_music.endswith("fast"):
                 bgm_player.play_music("hurry")
-                main_music = f"{main_music}fast"
-                star_music = f"{star_music}fast"
+                if exists(load_asset(f"music/{main_music}.ogg")):
+                    main_music = f"{main_music}_fast"
+                if exists(load_asset(f"music/{star_music}.ogg")):
+                    star_music = f"{star_music}_fast"
             if nor(bgm_player.is_playing("hurry"), everyone_dead, pipe_ready, pause):
                 bgm_player.play_music(main_music if all(player.star_timer < 1 for player in players) else star_music)
                 fast_music = True
