@@ -234,7 +234,7 @@
         "goomba": {
             "frames": {
                 "normal": 2,
-                "shot": 1,
+                "shot": 0,
                 "stomp": 1
             },
             "frame_speeds": {
@@ -263,5 +263,7 @@
         "star": true,
         "starfast": true,
         "title": true
-    }
+    },
+    "pitch_shot_sound": false,
+    "pitch_stomp_sound": false
 }

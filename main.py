@@ -1,7 +1,11 @@
-import pygame, json, math, numpy, psutil, sys
+import pygame, json, math, numpy, psutil, sys, subprocess
 from os.path import dirname, abspath, exists, getsize
-from os import listdir, makedirs, execv
+from os import listdir, makedirs
 from datetime import datetime
+
+class CustomError(Exception):
+    def __init__(self, name, message):
+        super().__init__(f"{name}: {message}")
 
 pygame.init()
 pygame.font.init()
@@ -9,9 +13,6 @@ pygame.mixer.init()
 
 infinity = float("inf")
 main_directory = dirname(abspath(__file__))
-
-def restart_script():
-    execv(sys.executable, [sys.executable] + sys.argv)
 
 def load_local_file(file):
     return f"{main_directory}/{file}"
@@ -24,24 +25,28 @@ asset_directory = "assets"
 
 try:
     asset_directory = load_json("settings")["asset_directory"]
+    if not isinstance(asset_directory, str):
+        raise CustomError("SaveDataError", f"Invalid type for 'asset_directory' in settings.json: expected str, got {type(asset_directory).__name__}.")
 except:
     pass
 
-def get_folders(directory):
-    directory = f"{main_directory}/{directory}"
-    return [folder for folder in listdir(directory)]
+old_asset_directory = asset_directory
 
-if not exists(f"{main_directory}/textures"):
-    makedirs(f"{main_directory}/textures")
+def restart():
+    subprocess.Popen(f'"{sys.executable}" "{sys.argv[0]}"')
+    sys.exit()
+
+def get_folders(directory):
+    return [folder for folder in listdir(load_local_file(directory))]
+
+if not exists(load_local_file("textures")):
+    makedirs(load_local_file("textures"))
     
 def key_exists(bundle, key):
     return key in bundle
 
 def load_asset(asset):
-    try:
-        return load_local_file(f"{asset_directory}/{asset}")
-    except:
-        return load_local_file(f"assets/{asset}")
+    return load_local_file(f"{asset_directory}/{asset}" if exists(load_local_file(f"{asset_directory}/{asset}")) else f"assets/{asset}")
 
 def get_game_property(*items):
     data = load_json(f"{asset_directory}/game_properties")
@@ -91,21 +96,20 @@ def xor(a, b):
 
 def create_course(data):
     default_music = {
-        "main_music": None,
-        "star_music": "star",
-        "dead_music": "dead",
-        "clear_music": "clear",
+        "main_music": data["music"] if key_exists(data, "music") else "overworld",
+        "clear_music": f"{main_music}_clear" if exists(f"{main_music}_clear") else "clear",
+        "dead_music": f"{main_music}_dead" if exists(f"{main_music}_dead") else "dead",
+        "hurry_music": f"{main_music}_hurry" if exists(f"{main_music}_hurry") else "hurry",
+        "star_music": f"{main_music}_star" if exists(f"{main_music}_star") else "star",
     }
 
     if key_exists(data, "music") and isinstance(data["music"], dict):
-        music_keys = ["main_music", "star_music", "dead_music", "clear_music"]
-        for key in music_keys:
-            globals()[key] = (data["music"] if key_exists(data["music"], key) else default_music)[key]
-
+        for key in default_music:
+            globals()[key] = data["music"].get(key, default_music[key])
     else:
         for key, value in default_music.items():
             globals()[key] = value
-
+    
     tiles = []
 
     if key_exists(data, "tiles") and isinstance(data["tiles"], dict):
@@ -210,6 +214,35 @@ def recolor_surface(surface, old_color, new_color):
 
     del pixel_array
     return recolored
+
+def initialize_game():
+    globals()["menu"] = False
+    globals()["pause"] = False
+    globals()["game_ready"] = False
+    globals()["reset_ready"] = False
+    globals()["everyone_dead"] = False
+    globals()["game_over"] = False
+    globals()["fast_music"] = False
+    globals()["fade_out"] = True
+    globals()["game"] = True
+    globals()["intro_players"] = None
+    globals()["logo"] = None
+    globals()["title_ground"] = None
+    globals()["castle"] = None
+    globals()["dt"] = 0
+    globals()["time"] = 0
+    globals()["pipe_wait_timer"] = 0
+    globals()["players"] = []
+    globals()["power_meters"] = []
+    globals()["tiles"] = []
+    globals()["pipe_markers"] = []
+    globals()["items"] = []
+    globals()["enemies"] = []
+    globals()["debris"] = []
+    globals()["particles"] = []
+    globals()["overlays"] = []
+    globals()["fireballs_table"] = {str(i): [] for i in range(player_count)}
+    globals()["hud"] = CoinHUD()
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 640, 400
 WALK_SPEED = 2.5
@@ -316,13 +349,15 @@ class BGMPlayer:
             self.stop_music()
             self.music = load_asset(f"music/{music}.ogg")
             try:
-                self.loop_point = get_game_property("loop_points")[music]
+                self.loop_point = get_game_property("loop_points", music)
+                if isinstance(self.loop_point, str):
+                    raise CustomError("LoopPointError", f"Expected numeric loop point, got string: {self.loop_point}")
             except KeyError:
                 self.loop_point = False
             pygame.mixer.music.load(self.music)
             pygame.mixer.music.play(-1 if self.loop_point == True else 0)
             self.set_volume(mus_vol)
-            if self.loop_point != 0:
+            if not self.loop_point == 0:
                 self.loop_point /= 1000
                 self.music_playing = True
             else:
@@ -341,6 +376,8 @@ class BGMPlayer:
         pygame.mixer.music.fadeout(int(FADE_DURATION * (1000 / 60)))
 
     def pause_music(self):
+        if nitpicks["play_music_in_pause"]:
+            return
         self.paused = not self.paused
         (pygame.mixer.music.pause if self.paused else pygame.mixer.music.unpause)()
 
@@ -351,61 +388,70 @@ class BGMPlayer:
                 self.music_playing = True
 
     def is_playing(self, music):
-        return pygame.mixer.music.get_busy() and self.music == load_asset(f"bgm_{music}.ogg")
+        return pygame.mixer.music.get_busy() and self.music == load_asset(f"music/{music}.ogg")
 
 class Text:
     def __init__(self):
         self.font_size = 16
         self.font = pygame.font.Font(load_asset("font.ttf"), self.font_size)
+        self.char_width = self.char_height = 0
 
     def create_text(self, text, position, color=(255, 255, 255), alignment="left", stickxtocamera=False, stickytocamera=False, scale=1):
-        char_offset = 0
-        line_offset = 0
-        lines = text.split("\n")
         x, y = position
-        rendered_lines = []
 
         if stickxtocamera and camera:
             x += camera.x
-
         if stickytocamera and camera:
             y += camera.y
 
-        max_line_width = 0
+        lines = text.split("\n")
+        rendered_lines = []
 
         for line in lines:
-            line_width = sum(
-                int(self.font.render(char, True, color).get_width() * scale) + char_offset for char in line
-            )
-            max_line_width = max(max_line_width, line_width)
+            text_surface = self.font.render(line, True, color)
+            text_width, text_height = text_surface.get_size()
+            text_width *= scale
+            text_height *= scale
 
-        for i, line in enumerate(lines):
-            rendered_line = []
-            offset_x = 0
+            if scale != 1.0:
+                text_surface = pygame.transform.scale(text_surface, (int(text_width), int(text_height)))
+                self.char_width = text_surface.get_width() * scale
+                self.char_height = text_surface.get_height() * scale
 
-            for char in line:
-                char_surface = self.font.render(char, True, color)
-                if scale != 1.0:
-                    char_surface = pygame.transform.scale(
-                        char_surface,
-                        (int(char_surface.get_width() * scale), int(char_surface.get_height() * scale))
-                    )
-                rendered_line.append((char_surface, offset_x))
-                offset_x += char_surface.get_width() + char_offset
+            if get_game_property("font_outline"):
+                outline_size = scale * 2
+                outline_surface = pygame.Surface(
+                    (int(text_width + outline_size * 2), int(text_height + outline_size * 2)), pygame.SRCALPHA
+                )
 
-            rendered_lines.append((rendered_line, y + i * (int(self.font.get_height() * scale) + line_offset)))
+                temp_surface = self.font.render(line, True, (0, 0, 0))
+                temp_surface = pygame.transform.scale(temp_surface, (int(text_width), int(text_height)))
 
-        for rendered_line, line_y in rendered_lines:
-            start_x = x
-            start_x -= camera.x
+                for dx in [-outline_size, 0, outline_size]:
+                    for dy in [-outline_size, 0, outline_size]:
+                        if dx == 0 and dy == 0:
+                            continue
+                        outline_surface.blit(temp_surface, (dx + outline_size, dy + outline_size))
+
+                outline_surface.blit(text_surface, (outline_size, outline_size))
+                text_surface = outline_surface
+                text_width += outline_size * 2
+                text_height += outline_size * 2
+
+            rendered_lines.append((text_surface, text_width, text_height))
+
+        line_height = max(text_height + 2, self.font_size * scale)
+
+        for i, (text_surface, text_width, text_height) in enumerate(rendered_lines):
+            line_x = x
+            line_y = y + i * line_height
 
             if alignment == "center":
-                start_x -= max_line_width // 2
+                line_x -= text_width // 2
             elif alignment == "right":
-                start_x -= max_line_width
+                line_x -= text_width
 
-            for char_surface, char_x in rendered_line:
-                screen.blit(char_surface, (start_x + char_x, line_y - (camera.y if stickytocamera else 0)))
+            screen.blit(text_surface, (line_x - (camera.x if stickxtocamera else 0), line_y - (camera.y if stickytocamera else 0)))
 
 class Background:
     def __init__(self):
@@ -417,7 +463,7 @@ class Background:
         self.bg_height = 0
 
     def load_background(self, bgname):
-        self.bg_layers_count = get_game_property("background_layers")[bgname]
+        self.bg_layers_count = get_game_property("background_layers", bgname)
         self.bg_image = load_background(bgname)
         self.bg_width, self.bg_height = self.bg_image.get_size()
         self.layer_width = self.bg_width // self.bg_layers_count
@@ -466,7 +512,7 @@ class Logo:
         if self.timer < self.bounce_time * 60:
             self.y += self.speedy
             self.speedy += 0.25
-        if self.y > self.bounce_y and canbounce and self.speedy != 0 and self.timer > 0:
+        if self.y > self.bounce_y and canbounce and self.timer > 0 and not self.speedy == 0:
             sound_player.play_sound(bump_sound)
             self.speedy /= -1.5
             self.y -= 0.25
@@ -491,9 +537,11 @@ class TitleGround:
 
 class PowerMeter:
     def __init__(self, player):
-        self.frames = [pygame.Rect(0, i * 7, 64, 7) for i in range(8)]
+        self.spritesheet = load_sprite("powermeter")
+        self.spritesheet_width, self.spritesheet_height = self.spritesheet.get_size()
+        self.power_meter_quads = get_game_property("power_meter_frames") or 8
+        self.frames = [pygame.Rect(0, i * (self.spritesheet_height // self.power_meter_quads), self.spritesheet_width, (self.spritesheet_height // self.power_meter_quads)) for i in range(self.power_meter_quads)]
         self.player = player
-        self.spritesheet = recolor_surface(load_sprite("powermeter"), [255, 255, 255], self.player.color)
         self.current_frame = 0
         self.frame_swap_timer = 0
         self.swap_state = False
@@ -551,7 +599,7 @@ class CoinAnimation:
 
 class CoinHUD:
     def __init__(self, coins=0):
-        self.x, self.y = 16, 16
+        self.x, self.y = 16, 17
         self.image = load_sprite("coinhud")
         self.coins = coins
 
@@ -1085,7 +1133,7 @@ class Fireball:
             self.frame_timer += 1
             self.frame_index = math.floor(min(self.frame_timer / 4, 3))
             if self.frame_timer >= 15:
-                [fireballs, fireballs2, fireballs3, fireballs4][self.player.player_number - 1].remove(self)
+                fireballs_table[str(self.player.player_number)].remove(self)
         else:
             self.angle -= 12 * (-1 if self.speedx < 0 else 1)
 
@@ -1181,7 +1229,10 @@ class Goomba:
             self.x += self.speedx
             self.y += self.speedy
             self.speedy += self.gravity
-            self.frame_index = self.properties["frames"]["normal"] + int((self.dt * self.properties["frame_speeds"]["shot"]) % self.properties["frames"]["shot"])
+            try:
+                self.frame_index = self.properties["frames"]["normal"] + int((self.dt * self.properties["frame_speeds"]["shot"]) % self.properties["frames"]["shot"])
+            except:
+                pass
             if self.rect.top >= SCREEN_HEIGHT:
                 enemies.remove(self)
         else:
@@ -1350,14 +1401,14 @@ class Koopa:
 
             for enemy in enemies:
                 if self.rect.colliderect(enemy.rect) and self is not enemy:
-                    if self.stomped and self.speedx != 0:
+                    if self.stomped and not self.speedx == 0:
                         enemy.shot(self)
                         overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, [100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000][self.combo]))
                         if self.combo == 8:
                             for player in players:
                                 player.lives += 1
-                        sound_player.play_sound(shot_sound, self.combo * 2)
                         self.combo = min(self.combo + 1, 8)
+                        sound_player.play_sound(shot_sound, ((self.combo - 1) * 2) if get_game_property("pitch_shot_sound") else 0)
                     elif not self.stomped:
                         if self.speedx > 0:
                             self.x = enemy.rect.left - self.rect.width
@@ -1620,7 +1671,7 @@ class Player:
                         self.speedx = 0
                         self.speedy = self.pipe_speed
                         if self.pipe_marker is None:
-                            if any(player.pipe_marker is not None and player.pipe_marker != pipe_marker for player in players):
+                            if any(player.pipe_marker is not None and not player.pipe_marker == pipe_marker for player in players):
                                 continue
                             self.pipe_marker = pipe_marker
                             self.piping = True
@@ -1630,7 +1681,7 @@ class Player:
                         self.speedx = 0
                         self.speedy = -self.pipe_speed
                         if self.pipe_marker is None:
-                            if any(player.pipe_marker is not None and player.pipe_marker != pipe_marker for player in players):
+                            if any(player.pipe_marker is not None and not player.pipe_marker == pipe_marker for player in players):
                                 continue
                             self.pipe_marker = pipe_marker
                             self.piping = True
@@ -1640,7 +1691,7 @@ class Player:
                         self.speedx = self.pipe_speed
                         self.speedy = 0
                         if self.pipe_marker is None:
-                            if any(player.pipe_marker is not None and player.pipe_marker != pipe_marker for player in players):
+                            if any(player.pipe_marker is not None and not player.pipe_marker == pipe_marker for player in players):
                                 continue
                             self.pipe_marker = pipe_marker
                             self.piping = True
@@ -1650,7 +1701,7 @@ class Player:
                         self.speedx = -self.pipe_speed
                         self.speedy = 0
                         if self.pipe_marker is None:
-                            if any(player.pipe_marker is not None and player.pipe_marker != pipe_marker for player in players):
+                            if any(player.pipe_marker is not None and not player.pipe_marker == pipe_marker for player in players):
                                 continue
                             self.pipe_marker = pipe_marker
                             self.piping = True
@@ -1678,12 +1729,12 @@ class Player:
 
             self.run_lock = self.run and not self.prev_run
 
-            if self.size == 2 and len([fireballs, fireballs2, fireballs3, fireballs4][self.player_number - 1]) < max_fireballs and not self.down:
+            if self.size == 2 and len(fireballs_table[str(self.player_number)]) < max_fireballs and not self.down:
                 if self.run:
                     if self.fire_timer < self.fire_duration:
                         if self.fire_timer == 0:
                             sound_player.play_sound(fireball_sound)
-                            [fireballs, fireballs2, fireballs3, fireballs4][self.player_number - 1].append(Fireball(self))
+                            fireballs_table[str(self.player_number)].append(Fireball(self))
                         self.fire_timer += 1
                         if self.fire_timer == self.fire_duration:
                             self.fire_lock = True
@@ -1866,8 +1917,8 @@ class Player:
                         overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, [100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000][self.star_combo]))
                         if self.star_combo == 8:
                             self.add_life()
-                        sound_player.play_sound(shot_sound, self.star_combo * 2)
                         self.star_combo = min(self.star_combo + 1, 8)
+                        sound_player.play_sound(shot_sound, ((self.star_combo - 1) * 2) if get_game_property("pitch_shot_sound") else 0)
                     else:
                         if isinstance(enemy, Koopa):
                             if self.speedy > 0 and self.rect.bottom - enemy.rect.top < 8:
@@ -1876,7 +1927,7 @@ class Player:
                                     overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, [100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000][self.stomp_combo]))
                                     if self.stomp_combo == 8:
                                         self.add_life()
-                                    sound_player.play_sound(stomp_sound, self.stomp_combo)
+                                    sound_player.play_sound(stomp_sound, self.stomp_combo if get_game_property("pitch_stomp_sound") else 0)
                                     self.stomp_combo = min(self.stomp_combo + 1, 8)
                                     self.stomp_jump = True
                                     self.speedy = -self.max_jump
@@ -1900,7 +1951,7 @@ class Player:
                                             overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, [100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000][self.stomp_combo]))
                                             if self.stomp_combo == 8:
                                                 self.add_life()
-                                            sound_player.play_sound(stomp_sound, self.stomp_combo)
+                                            sound_player.play_sound(stomp_sound, self.stomp_combo if get_game_property("pitch_stomp_sound") else 0)
                                             self.stomp_combo = min(self.stomp_combo + 1, 8)
                                             self.stomp_jump = True
                                             self.speedy = -self.max_jump
@@ -1958,7 +2009,7 @@ class Player:
                             overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, [100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000][self.stomp_combo]))
                             if self.stomp_combo == 8:
                                 self.add_life()
-                            sound_player.play_sound(stomp_sound, self.stomp_combo)
+                            sound_player.play_sound(stomp_sound, self.stomp_combo if get_game_property("pitch_stomp_sound") else 0)
                             self.stomp_combo = min(self.stomp_combo + 1, 8)
 
                         elif not self.shrunk:
@@ -1987,8 +2038,8 @@ class Player:
                         sound_player.play_sound(powerup_sound)
                     else:
                         overlays.append(Score(item.x - camera.x, item.y - camera.y, 1000))
-                        if nand((isinstance(item, Mushroom) and self.size != 0), (isinstance(item, (Mushroom, FireFlower)) and self.size == 2)):
-                            if self.size != item.size:
+                        if nand((isinstance(item, Mushroom) and not self.size == 0), (isinstance(item, (Mushroom, FireFlower)) and self.size == 2)):
+                            if not self.size == item.size:
                                 old_size = self.size
                                 self.size_change_timer = 0
                                 self.size_change = [item.size, old_size, item.size, old_size, item.size, old_size, item.size]
@@ -2007,7 +2058,7 @@ class Player:
                 self.dead = True
                 self.dead_speed = 0
 
-            self.skidding = (self.fall_timer < self.fall_duration and ((self.speedx < 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)) and nor(self.down, 1 <= self.anim_state <= self.frame_data["idle"]))
+            self.skidding = (self.fall_timer < self.fall_duration and ((self.speedx < 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)) and nor(self.down, 0 <= self.anim_state <= self.frame_data["idle"], abs(self.speedx) < MIN_SPEEDX))
 
             if self.on_ground:
                 self.speedy = 0
@@ -2063,7 +2114,7 @@ class Player:
         if self.can_draw:
             sprite = self.spritesheet.subsurface(self.sprites[self.size][self.anim_state])
             sprite = pygame.transform.flip(sprite, xor((not self.facing_right), nitpicks["moonwalking_mario"]), False)
-            draw_x = self.rect.x - camera.x - 6
+            draw_x = self.rect.x - camera.x - 4 - ((self.quad_width - 20) / 2)
             draw_y = self.rect.y - camera.y + self.rect.height - 34
             screen.blit(sprite, (draw_x, draw_y))
 
@@ -2096,8 +2147,7 @@ class Player:
                 star_mask.fill(current_color, special_flags=pygame.BLEND_RGBA_MULT)
                 screen.blit(star_mask, (draw_x, draw_y))
 
-mus_vol = 1
-snd_vol = 1
+mus_vol = snd_vol = 1
 controls = {
     "up": pygame.K_UP,
     "down": pygame.K_DOWN,
@@ -2135,16 +2185,6 @@ controls4 = {
     "pause": pygame.K_BREAK
 }
 fullscreen = False
-
-if exists(load_local_file("settings.json")) and not getsize(load_local_file("settings.json")) == 0:
-    data = load_json("settings")
-    mus_vol = data["mus_vol"]
-    snd_vol = data["snd_vol"]
-    controls = data["controls"]
-    controls2 = data["controls2"]
-    controls3 = data["controls3"]
-    controls4 = data["controls4"]
-    fullscreen = data["fullscreen"]
 
 nitpicks_list = [
     "moonwalking_mario",
@@ -2186,6 +2226,7 @@ pygame.display.set_icon(pygame.image.load(load_asset("icon.ico")))
 pygame.display.set_caption(f"Super Mario Bros. for Python (FPS: {round(clock.get_fps())})" if nitpicks["show_fps"] else "Super Mario Bros. for Python")
 player_dist = 20
 intro_players = [Player(x=centerx - player_dist / 2 + player_dist * i, y=SCREEN_HEIGHT, controls_enabled=False, size=1, player_number=i) for i in count_list_items(characters_name)]
+players = []
 camera = Camera()
 bgm_player = BGMPlayer()
 sound_player = SFXPlayer()
@@ -2197,19 +2238,17 @@ tiles = []
 pipe_markers = []
 items = []
 enemies = []
-fireballs = []
-fireballs2 = []
-fireballs3 = []
-fireballs4 = []
+fireballs_table = {}
 debris = []
 power_meters = []
 particles = []
 overlays = []
 player_lives = []
+player_sizes = []
 players_hud = []
 world = 0
 course = 0
-lives = 3
+lives = get_game_property("lives") or 3
 score = 0
 time = 0
 pipe_wait_timer = 0
@@ -2228,8 +2267,24 @@ a = 255
 fade_in = False
 fade_out = False
 
+if exists(load_local_file("settings.json")) and not getsize(load_local_file("settings.json")) == 0:
+    data = load_json("settings")
+    mus_vol = data["mus_vol"]
+    snd_vol = data["snd_vol"]
+    fullscreen = data["fullscreen"]
+
+    for key in data:
+        if key.startswith("controls"):
+            globals()[key] = data[key]
+
+players_ready = 1
+players_controls = 1
+selected_texture = 1
 selected_menu_index = 0
 pause_menu_index = 0
+old_players_ready = 1
+old_players_controls = 1
+old_selected_texture = 1
 old_selected_menu_index = 0
 old_pause_menu_index = 0
 old_mus_vol = mus_vol
@@ -2244,6 +2299,7 @@ binding_key = False
 current_bind = False
 game_ready = False
 exit_ready = False
+reset_ready = False
 game = False
 everyone_dead = False
 numerical_change = 0.05
@@ -2266,20 +2322,29 @@ while running:
 
     mus_vol = round(range_number(mus_vol, 0, 1) * (1 / numerical_change)) / (1 / numerical_change)
     snd_vol = round(range_number(snd_vol, 0, 1) * (1 / numerical_change)) / (1 / numerical_change)
-    if nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol):
+    players_ready = range_number(players_ready, 1, len(characters_data))
+    players_controls = range_number(players_controls, 1, len(characters_data))
+    selected_texture = range_number(selected_texture, 1, len(get_folders("textures")))
+    if nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_players_ready == players_ready, old_players_controls == players_controls, old_selected_texture == selected_texture):
         sound_player.play_sound(beep_sound)
     old_mus_vol = mus_vol
     old_snd_vol = snd_vol
+    old_players_ready = players_ready
+    old_players_controls = players_controls
+    old_selected_texture = selected_texture
 
     with open(load_local_file("settings.json"), "w") as settings:
         json.dump(
             {
                 "mus_vol": mus_vol,
                 "snd_vol": snd_vol,
-                **{f"controls{'' if i == 0 else i+1}": controls_table[i] for i in count_list_items(controls_table)},
+                **{f"controls{'' if i == 0 else i+1}": controls_table[i] for i in count_list_items(characters_data)},
                 "fullscreen": fullscreen,
                 "asset_directory": asset_directory
             }, settings, indent=4)
+
+    if not old_asset_directory == asset_directory:
+        restart()
 
     if fade_in:
         fade_out = False
@@ -2296,35 +2361,7 @@ while running:
                 binding_key = False
                 current_bind = False
             elif game_ready:
-                menu = False
-                game = True
-                game_ready = False
-                everyone_dead = False
-                game_over = False
-                fast_music = False
-                fade_out = True
-                intro_players = None
-                logo = None
-                title_ground = None
-                castle = None
-                dt = 0
-                time = 0
-                pipe_wait_timer = 0
-                players = []
-                power_meters = []
-                tiles = []
-                pipe_markers = []
-                items = []
-                enemies = []
-                fireballs = []
-                fireballs2 = []
-                fireballs3 = []
-                fireballs4 = []
-                debris = []
-                particles = []
-                overlays = []
-                player_lives = []
-                hud = CoinHUD()
+                initialize_game()
                 course += 1
                 while not exists(load_local_file(f"courses/{world}-{course}.json")):
                     course = 1
@@ -2333,7 +2370,16 @@ while running:
                 if time > 100:
                     bgm_player.play_music(main_music)
                 for i in range(player_count):
-                    players.append(Player(x=spawnposx + i * 8, y=spawnposy, player_number=i, lives=lives))
+                    players.append(Player(x=spawnposx + i * 8, y=spawnposy, player_number=i, lives=player_lives[i], size=player_sizes[i]))
+                    power_meters.append(PowerMeter(players[i]))
+                    players_hud.append(PlayerHUD(players[i]))
+            elif reset_ready:
+                initialize_game()
+                create_course(load_json(f"courses/{world}-{course}"))
+                if time > 100:
+                    bgm_player.play_music(main_music)
+                for i in range(player_count):
+                    players.append(Player(x=spawnposx + i * 8, y=spawnposy, player_number=i, lives=player_lives[i], size=player_sizes[i]))
                     power_meters.append(PowerMeter(players[i]))
                     players_hud.append(PlayerHUD(players[i]))
             elif everyone_dead:
@@ -2347,33 +2393,13 @@ while running:
                     dt = 0
                     pipe_wait_timer = 0
                 else:
-                    fade_out = True
-                    everyone_dead = False
-                    game_over = False
-                    fast_music = False
-                    game = True
-                    castle = None
-                    dt = 0
-                    time = 0
-                    players = []
-                    power_meters = []
-                    tiles = []
-                    pipe_markers = []
-                    items = []
-                    enemies = []
-                    fireballs = []
-                    fireballs2 = []
-                    fireballs3 = []
-                    fireballs4 = []
-                    debris = []
-                    particles = []
-                    overlays = []
+                    initialize_game()
                     create_course(load_json(f"courses/{world}-{course}"))
                     if time > 100:
                         bgm_player.play_music(main_music)
                     for i in range(player_count):
                         if player_lives[i] == 0:
-                            player_lives[i] = 3
+                            player_lives[i] = lives
                         players.append(Player(x=spawnposx + i * 8, y=spawnposy, player_number=i, lives=player_lives[i]))
                         power_meters.append(PowerMeter(players[i]))
                         players_hud.append(PlayerHUD(players[i]))
@@ -2388,22 +2414,26 @@ while running:
     if menu:
         title_screen = [
             [
-                *[[f"{i+1} player game", 0.75 + (i / 8)] for i in count_list_items(characters_data)],
-                ["options", 0.75 + (len(characters_data) / 8)],
-                ["quit", 0.875 + (len(characters_data) / 8)]
+                [f"{players_ready} player game", 0.75],
+                ["options", 0.875],
+                ["quit", 1]
             ],
             [
-                *[[f"controls ({characters_name[i]})", 0.75 + (i / 8), tuple(characters_color[i])] for i in count_list_items(characters_data)],
-                [f"music volume: {int(mus_vol * 100)}%", 1.25],
-                [f"sound volume: {int(snd_vol * 100)}%", 1.375],
-                ["load texture", 1.5],
-                ["back", 1.625]
+                [f"controls ({characters_name[players_controls - 1]})", 0.75, tuple(characters_color[players_controls - 1])],
+                [f"music volume: {int(mus_vol * 100)}%", 0.875],
+                [f"sound volume: {int(snd_vol * 100)}%", 1],
+                ["load texture", 1.125],
+                ["back", 1.25]
             ],
         ]
 
         textures_list = get_folders("textures")
-        textures = [[f"{textures_list[i]}", 0.75 + (i / 8)] for i in count_list_items(textures_list)]
-        title_screen.append([textures])
+        textures = [
+            ["base texture", 0.75],
+            [f"{textures_list[selected_texture - 1]}", 0.875],
+            ["back", 1]
+        ]
+        title_screen.append(textures)
 
         for i in count_list_items(characters_data):
             title_screen.append(
@@ -2420,7 +2450,7 @@ while running:
 
         menu_options = title_screen[menu_area - 1]
         selected_menu_index = range_number(selected_menu_index, 0, len(menu_options) - 1)
-        if old_selected_menu_index != selected_menu_index:
+        if not old_selected_menu_index == selected_menu_index:
             sound_player.play_sound(beep_sound)
         old_selected_menu_index = selected_menu_index
         
@@ -2439,56 +2469,86 @@ while running:
         if menu_options == title_screen[0]:
             for i in count_list_items(menu_options):
                 options = menu_options[i]
-                
-                display_text = f"> {options[0]} <" if i == selected_menu_index else options[0]
 
                 text.create_text(
-                    text=display_text.upper(),
-                    position=(centerx, centery * options[1]),
-                    alignment="center",
-                    stickxtocamera=True
-                )
-        elif menu_options == title_screen[1]:
-            for i in count_list_items(menu_options):
-                options = menu_options[i]
-                
-                display_text = f"> {options[0]} <" if i == selected_menu_index else options[0]
-
-                text.create_text(
-                    text=display_text.upper(),
+                    text=options[0].upper(),
                     position=(centerx, centery * options[1]),
                     alignment="center",
                     stickxtocamera=True,
-                    color=options[2] if len(options) == 3 else (255, 255, 255)
+                    color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
                 )
+
+                if selected_menu_index == 0:
+                    text.create_text(
+                        text="PRESS LEFT OR RIGHT\nTO SWITCH BETWEEN PLAYERS",
+                        position=(centerx, centery / 16 + 4),
+                        alignment="center",
+                        stickxtocamera=True,
+                        scale=0.5
+                    )
+        
+        elif menu_options == title_screen[1]:
+            for i in count_list_items(menu_options):
+                options = menu_options[i]
+
+                text.create_text(
+                    text=options[0].upper(),
+                    position=(centerx, centery * options[1]),
+                    alignment="center",
+                    stickxtocamera=True,
+                    color=(options[2] if selected_menu_index == i else tuple(x / 2 for x in options[2])) if len(options) == 3 else ((255, 255, 255) if selected_menu_index == i else (128, 128, 128))
+                )
+
+                if selected_menu_index == 0:
+                    text.create_text(
+                        text="PRESS LEFT OR RIGHT\nTO SWITCH BETWEEN PLAYERS",
+                        position=(centerx, centery / 16 + 4),
+                        alignment="center",
+                        stickxtocamera=True,
+                        scale=0.5
+                    )
+        
         elif menu_options == title_screen[2]:
             for i in count_list_items(textures):
                 texture_data = textures[i]
+                
                 text.create_text(
-                    text=texture_data[0],
+                    text=texture_data[0].upper(),
                     position=(centerx, centery * texture_data[1]),
                     alignment="center",
-                    stickxtocamera=True
+                    stickxtocamera=True,
+                    color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
                 )
-        elif key_exists(title_screen[3:len(title_screen)], menu_options):
+
+                if selected_menu_index == 1:
+                    text.create_text(
+                        text="PRESS LEFT OR RIGHT\nTO SWITCH BETWEEN TEXTURES",
+                        position=(centerx, centery * 1.125),
+                        alignment="center",
+                        stickxtocamera=True,
+                        scale=0.5
+                    )
+        
+        elif key_exists(title_screen[3:], menu_options):
             for i in count_list_items(menu_options):
                 options = menu_options[i]
+
+                text.create_text(
+                    text=options[0].upper(),
+                    position=(centerx, centery * options[1]),
+                    alignment="center",
+                    stickxtocamera=True,
+                    color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
+                )
+                
                 if binding_key and selected_menu_index == i:
                     text.create_text(
                         text="PRESS ESC TO CANCEL BINDING",
                         position=(centerx, centery / 16),
                         alignment="center",
-                        stickxtocamera=True
+                        stickxtocamera=True,
+                        color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
                     )
-                
-                display_text = f"> {options[0]} <" if i == selected_menu_index else options[0]
-
-                text.create_text(
-                    text=display_text.upper(),
-                    position=(centerx, centery * options[1]),
-                    alignment="center",
-                    stickxtocamera=True
-                )
 
         if game_ready or exit_ready:
             logo.draw()
@@ -2559,15 +2619,15 @@ while running:
             tile.draw()
             if not pause:
                 tile.update()
-
-        for fireball_group in [fireballs, fireballs2, fireballs3, fireballs4]:
-            for fireball in fireball_group[:]:
+        
+        for fireball_list in fireballs_table.values():
+            for fireball in fireball_list[:]:
                 if fireball.is_visible():
                     fireball.draw()
-                    if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
+                    if not (any(player.size_change for player in players) or everyone_dead or pause or pipe_ready):
                         fireball.update()
                 else:
-                    fireball_group.remove(fireball)
+                    fireball_list.remove(fireball)
 
         for enemy in enemies:
             if enemy.is_visible():
@@ -2597,6 +2657,7 @@ while running:
                 enemies.remove(enemy)
 
         player_lives = [player.lives for player in players]
+        player_sizes = [player.size for player in players]
 
         if course_time <= 0:
             if everyone_dead:
@@ -2655,14 +2716,14 @@ while running:
             hud.draw()
 
             text.create_text(
-                text=f"x{hud.coins:02}",
+                text=f"x{format_number(hud.coins, 2)}",
                 position=(24, 16),
                 stickxtocamera=True,
                 scale=0.5
             )
 
             text.create_text(
-                text=f"{score:09}",
+                text=f"{format_number(score, 9)}",
                 position=(632, 16),
                 alignment="right",
                 stickxtocamera=True,
@@ -2670,14 +2731,14 @@ while running:
             )
 
             text.create_text(
-                text=f"{course_time:03}",
+                text=f"{format_number(course_time, 3)}",
                 position=(632, 32),
                 alignment="right",
                 stickxtocamera=True,
                 scale=0.5
             )
 
-            screen.blit(load_sprite("hudclock"), (622 - (len(str(format_number(course_time, 3))) * (text.font_size / 2)), 32))
+            screen.blit(load_sprite("hudclock"), (632 - text.char_width - sum(text.font.render(char, True, (255, 255, 255)).get_width() / 2 for char in str(format_number(course_time, 3))), 32))
 
         if players_hud:
             for player_hud in players_hud:
@@ -2698,27 +2759,27 @@ while running:
         (sound_player.loop_sound if any(player.skidding for player in players) and nor(everyone_dead, pause, any(player.piping for player in players)) else sound_player.stop_sound)(skid_sound)
 
         pause_menu_options = [
-            ["resume", 0.8125],
-            [f"music volume: {int(mus_vol * 100)}%", 0.9375],
-            [f"sound volume: {int(snd_vol * 100)}%", 1.0625],
-            ["quit", 1.1875]
+            ["resume", 0.75],
+            ["restart", 0.875],
+            [f"music volume: {int(mus_vol * 100)}%", 1],
+            [f"sound volume: {int(snd_vol * 100)}%", 1.125],
+            ["quit", 1.25]
         ]
 
         if pause:
             for i in count_list_items(pause_menu_options):
                 options = pause_menu_options[i]
 
-                display_text = f"> {options[0]} <" if i == pause_menu_index else options[0]
-
                 text.create_text(
-                    text=display_text,
+                    text=options[0].upper(),
                     position=(centerx, centery * options[1]),
                     alignment="center",
                     stickxtocamera=True,
-                    stickytocamera=True
+                    stickytocamera=True,
+                    color=(255, 255, 255) if pause_menu_index == i else (128, 128, 128)
                 )
-        pause_menu_index = range_number(pause_menu_index, 0, 3)
-        if old_pause_menu_index != pause_menu_index:
+        pause_menu_index = range_number(pause_menu_index, 0, len(pause_menu_options) - 1)
+        if not old_pause_menu_index == pause_menu_index:
             sound_player.play_sound(beep_sound)
         old_pause_menu_index = pause_menu_index
     
@@ -2739,183 +2800,142 @@ while running:
 
     if nitpicks["show_battery"]:
         battery = psutil.sensors_battery().percent
-        if battery < 0:
-            color = (255, 0, 0)
-        elif battery < 50:
-            color = (255, math.floor(255 * (battery / 40)), 0)
-        elif battery < 100:
-            color = (math.floor(255 * (1 - ((battery - 50) / 40))), 255, 0)
-        else:
-            color = (0, 255, 0)
-        
         text.create_text(
-            text=f"Battery: {battery}%",
-            position=(632, 384 - ((text.font_size / 2) if nitpicks["show_time"] else 0)),
-            alignment="right",
-            stickxtocamera=True,
-            stickytocamera=True,
-            color=(range_number(color[0], 0, 255), range_number(color[1], 0, 255), range_number(color[2], 0, 255)),
-            scale=0.5
+            text=f"BATTERY: {battery}%",
+            position=(632, 384 - (text.font_size / 2 if nitpicks["show_time"] else 0)),
+            alignment="right", stickxtocamera=True, stickytocamera=True, scale=0.5,
+            color=tuple(range_number(c, 0, 255) for c in ((255, 0, 0) if battery < 0 else ((255, min(255, int(255 * (battery / 40))), 0) if battery < 50 else (max(0, int(255 * (1 - ((battery - 50) / 40)))), 255, 0) if battery < 100 else (0, 255, 0))))
         )
 
     if nitpicks["show_time"]:
-        currenttime = datetime.now().strftime("%H:%M:%S")
         text.create_text(
-            text=f"Time: {currenttime}",
-            position=(632, 384),
-            alignment="right",
-            stickxtocamera=True,
-            stickytocamera=True,
-            scale=0.5
+            text=f"TIME: {datetime.now().strftime('%H:%M:%S')}",
+            position=(632, 384), alignment="right", stickxtocamera=True, stickytocamera=True, scale=0.5
         )
-    
+
     fade_surface.fill((0, 0, 0, a))
     screen.blit(fade_surface, (0, 0))
 
-    if menu and not game_ready:
+    if menu and not fade_in:
         logo.draw()
         logo.update()
         
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            running = False
-            menu = False
-            title = False
-            fade_in = False
-            fade_out = False
-            binding_key = False
-            current_bind = False
+            running = menu = title = fade_in = fade_out = binding_key = current_bind = False
         elif event.type == pygame.KEYDOWN:
-            if game and (any(event.key == controls_set["pause"] for controls_set in controls_table)) and nor(any(player.piping for player in players), everyone_dead):
-                if not nitpicks["play_music_in_pause"]:
-                    bgm_player.pause_music()
+            key, mod = event.key, event.mod
+            if game and any(key == controls_set["pause"] for controls_set in controls_table) and nor(any(p.piping for p in players), everyone_dead):
+                bgm_player.pause_music()
                 pause = not pause
                 sound_player.play_sound(pause_sound)
-                pause_menu_index = 0
-                old_pause_menu_index = 0
+                pause_menu_index = old_pause_menu_index = 0
             if game and pause and not fade_in:
-                if event.key == controls["down"]:
+                if key == controls["down"]:
                     pause_menu_index += 1
-                elif event.key == controls["up"]:
+                elif key == controls["up"]:
                     pause_menu_index -= 1
-                elif event.key == controls["left"]:
-                    if pause_menu_index == 1:
-                        mus_vol -= numerical_change
-                    elif pause_menu_index == 2:
-                        snd_vol -= numerical_change
-                elif event.key == controls["right"]:
-                    if pause_menu_index == 1:
-                        mus_vol += numerical_change
-                    elif pause_menu_index == 2:
-                        snd_vol += numerical_change
-                elif event.key == controls["jump"]:
+                elif key in (controls["left"], controls["right"]):
+                    change = numerical_change if key == controls["right"] else -numerical_change
+                    if pause_menu_index == 2:
+                        mus_vol += change
+                    elif pause_menu_index == 3:
+                        snd_vol += change
+                elif key == controls["jump"]:
                     if pause_menu_index == 0:
                         pause = False
                         sound_player.play_sound(coin_sound)
-                        if not nitpicks["play_music_in_pause"]:
-                            bgm_player.pause_music()
-                    elif pause_menu_index == 3:
-                        fade_in = True
-                        exit_ready = True
+                        bgm_player.pause_music()
+                    elif pause_menu_index == 1:
+                        fade_in = reset_ready = True
+                        bgm_player.fade_out()
+                        sound_player.play_sound(coin_sound)
+                    elif pause_menu_index == 4:
+                        fade_in = exit_ready = True
                         bgm_player.fade_out()
                         sound_player.play_sound(coin_sound)
             if game_over and dt >= 60 and nor(bgm_player.is_playing("gameover"), game_ready):
                 bgm_player.stop_music()
                 sound_player.stop_all_sounds()
                 sound_player.play_sound(coin_sound)
-                fade_in = True
-                game_ready = True
-            if event.key == pygame.K_RETURN and event.mod & pygame.KMOD_ALT:
+                fade_in = game_ready = True
+            if key == pygame.K_RETURN and mod & pygame.KMOD_ALT:
                 fullscreen = not fullscreen
                 pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.RESIZABLE | (pygame.FULLSCREEN if fullscreen else 0))
             if menu and nor(title, fade_in, fade_out, game_ready):
                 if binding_key:
-                    if event.key == pygame.K_ESCAPE:
-                        sound_player.play_sound(pipe_sound)
-                    else:
-                        sound_player.play_sound(powerup_sound)
-                        controls_table[menu_area + 3][bind_table[selected_menu_index]] = event.key
-                    binding_key = False
-                    current_bind = False
+                    sound_player.play_sound(shrink_sound if key == pygame.K_ESCAPE else powerup_sound)
+                    if not key == pygame.K_ESCAPE:
+                        controls_table[menu_area - 4][bind_table[selected_menu_index]] = key
+                    binding_key = current_bind = False
                     sound_player.stop_sound(sprout_sound)
                 else:
-                    if event.key == controls["down"]:
+                    if key == controls["down"]:
                         selected_menu_index += 1
-                    elif event.key == controls["up"]:
+                    elif key == controls["up"]:
                         selected_menu_index -= 1
-                if event.key == controls["left"]:
-                    if menu_options == title_screen[1]:
-                        if selected_menu_index == 4:
-                            mus_vol -= numerical_change
-                        elif selected_menu_index == 5:
-                            snd_vol -= numerical_change
-                elif event.key == controls["right"]:
-                    if menu_options == title_screen[1]:
-                        if selected_menu_index == 4:
-                            mus_vol += numerical_change
-                        elif selected_menu_index == 5:
-                            snd_vol += numerical_change
-                elif event.key == controls["run"] and not binding_key:
-                    if menu_options == title_screen[1]:
-                        selected_menu_index = 0
-                        old_selected_menu_index = 0
-                        menu_area = 1
-                        sound_player.play_sound(pipe_sound)
-                    elif menu_options == title_screen[2]:
-                        selected_menu_index = 0
-                        old_selected_menu_index = 0
-                        menu_area = 2
-                        sound_player.play_sound(pipe_sound)
-                    elif key_exists(title_screen[3:len(title_screen)], menu_options):
-                        selected_menu_index = 0
-                        old_selected_menu_index = 0
-                        menu_area = 2
-                        sound_player.play_sound(pipe_sound)
-                elif event.key == controls["jump"]:
-                    if menu_options == title_screen[0]:
-                        if selected_menu_index == len(menu_options) - 2:
-                            selected_menu_index = 0
-                            old_selected_menu_index = 0
-                            menu_area = 2
-                            sound_player.play_sound(coin_sound)
-                        elif selected_menu_index == len(menu_options) - 1:
-                            fade_in = True
-                            exit_ready = True
-                            bgm_player.fade_out()
-                            sound_player.play_sound(coin_sound)
-                        else:
-                            fade_in = True
-                            game_ready = True
-                            bgm_player.fade_out()
-                            sound_player.play_sound(coin_sound)
-                            player_count = selected_menu_index + 1
-                    elif menu_options == title_screen[1]:
-                        if 0 <= selected_menu_index <= len(menu_options) - 5:
-                            menu_area = selected_menu_index - 3
-                            selected_menu_index = 0
-                            old_selected_menu_index = 0
-                            sound_player.play_sound(coin_sound)
-                        elif selected_menu_index == len(menu_options) - 2:
-                            selected_menu_index = 0
-                            old_selected_menu_index = 0
-                            menu_area = 3
-                            sound_player.play_sound(coin_sound)
-                        elif selected_menu_index == len(menu_options) - 1:
-                            selected_menu_index = 0
-                            old_selected_menu_index = 0
-                            menu_area = 1
-                            sound_player.play_sound(coin_sound)
-                    elif key_exists(title_screen[3:len(title_screen)], menu_options) and not binding_key:
-                        if selected_menu_index == 7:
-                            selected_menu_index = 0
-                            old_selected_menu_index = 0
-                            menu_area = 2
-                            sound_player.play_sound(coin_sound)
-                        else:
-                            binding_key = True
-                            current_bind = bind_table[selected_menu_index]
-                            sound_player.play_sound(sprout_sound)
-                            sound_player.stop_sound(powerup_sound)
+                    elif key in (controls["left"], controls["right"]):
+                        change = numerical_change if key == controls["right"] else -numerical_change
+                        if menu_options == title_screen[0] and selected_menu_index == 0:
+                            players_ready += 1 if key == controls["right"] else -1
+                        elif menu_options == title_screen[1]:
+                            if selected_menu_index == 0:
+                                players_controls += 1 if key == controls["right"] else -1
+                            elif selected_menu_index == 1:
+                                mus_vol += change
+                            elif selected_menu_index == 2:
+                                snd_vol += change
+                        elif menu_options == title_screen[2] and selected_menu_index == 1:
+                            selected_texture += 1 if key == controls["right"] else -1
+                    elif key == controls["run"] and not binding_key:
+                        if menu_options in title_screen[1:3] or key_exists(title_screen[3:], menu_options):
+                            selected_menu_index = old_selected_menu_index = 0
+                            menu_area = 1 if menu_options == title_screen[1] else 2
+                            players_ready = old_players_ready = 1
+                            players_controls = old_players_controls = 1
+                            sound_player.play_sound(shrink_sound)
+                    elif key == controls["jump"]:
+                        if menu_options == title_screen[0]:
+                            if selected_menu_index == 1:
+                                selected_menu_index = old_selected_menu_index = 0
+                                menu_area = 2
+                                players_ready = old_players_ready = 1
+                                sound_player.play_sound(coin_sound)
+                            elif selected_menu_index == 2:
+                                fade_in = exit_ready = True
+                                bgm_player.fade_out()
+                                sound_player.play_sound(coin_sound)
+                            else:
+                                fade_in = game_ready = True
+                                bgm_player.fade_out()
+                                sound_player.play_sound(coin_sound)
+                                player_count = players_ready
+                                player_lives, player_sizes = [lives] * player_count, [0] * player_count
+                        elif menu_options == title_screen[1]:
+                            if selected_menu_index in (0, 3, 4):
+                                menu_area = players_controls + 3 if selected_menu_index == 0 else 1 if selected_menu_index == 4 else 3
+                                selected_menu_index = old_selected_menu_index = 0
+                                players_controls = old_players_controls = 1
+                                selected_texture = old_selected_texture = 1
+                                sound_player.play_sound(coin_sound)
+                        elif menu_options == title_screen[2]:
+                            if selected_menu_index == 0:
+                                old_asset_directory = asset_directory
+                                asset_directory = "assets"
+                            elif selected_menu_index == 1:
+                                old_asset_directory = asset_directory
+                                asset_directory = f"textures/{textures_list[selected_texture - 1]}"
+                        elif key_exists(title_screen[3:], menu_options) and not binding_key:
+                            if selected_menu_index == 7:
+                                selected_menu_index = old_selected_menu_index = 0
+                                menu_area = 2
+                                players_controls = old_players_controls = 1
+                                sound_player.play_sound(coin_sound)
+                            else:
+                                binding_key = True
+                                current_bind = bind_table[selected_menu_index]
+                                sound_player.play_sound(sprout_sound)
+                                sound_player.stop_sound(powerup_sound)
 
     bgm_player.update()
     pygame.display.flip()

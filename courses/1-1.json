@@ -1,7 +1,5 @@
 {
-    "music": {
-        "main_music": "overworld"
-    },
+    "music": "overworld",
     "spawnpositions": [42, 290],
     "width": 224,
     "timelimit": 400,
