@@ -2161,6 +2161,7 @@ class Player:
                 screen.blit(star_mask, (draw_x, draw_y))
 
 mus_vol = snd_vol = 1
+
 controls = {
     "up": pygame.K_UP,
     "down": pygame.K_DOWN,
@@ -2199,6 +2200,48 @@ controls4 = {
 }
 fullscreen = False
 
+characters_data = get_game_property("character_properties", "character_data")
+characters_name = [get_game_property("character_properties", "character_data", i, "name") for i in count_list_items(characters_data)]
+characters_color = [get_game_property("character_properties", "character_data", i, "color") for i in count_list_items(characters_data)]
+
+for i in range(math.floor(len(characters_data) / 4)):
+    globals()["controls" if i == 0 else f"controls{i + 1}"] = {
+        "up": pygame.K_UP,
+        "down": pygame.K_DOWN,
+        "left": pygame.K_LEFT,
+        "right": pygame.K_RIGHT,
+        "run": pygame.K_z,
+        "jump": pygame.K_x,
+        "pause": pygame.K_RETURN
+    }
+    globals()[f"controls{i + 2}"] = {
+        "up": pygame.K_w,
+        "down": pygame.K_s,
+        "left": pygame.K_a,
+        "right": pygame.K_d,
+        "run": pygame.K_c,
+        "jump": pygame.K_v,
+        "pause": pygame.K_p
+    }
+    globals()[f"controls{i + 3}"] = {
+        "up": pygame.K_i,
+        "down": pygame.K_j,
+        "left": pygame.K_k,
+        "right": pygame.K_l,
+        "run": pygame.K_m,
+        "jump": pygame.K_n,
+        "pause": pygame.K_o
+    }
+    globals()[f"controls{i + 4}"] = {
+        "up": pygame.K_HOME,
+        "down": pygame.K_END,
+        "left": pygame.K_DELETE,
+        "right": pygame.K_PAGEDOWN,
+        "run": pygame.K_INSERT,
+        "jump": pygame.K_PAGEUP,
+        "pause": pygame.K_BREAK
+    }
+
 nitpicks_list = [
     "moonwalking_mario",
     "moonwalking_enemies",
@@ -2230,9 +2273,6 @@ nitpicks = load_json("nitpicks")
 running = True
 centerx = SCREEN_WIDTH / 2
 centery = SCREEN_HEIGHT / 2
-characters_data = get_game_property("character_properties", "character_data")
-characters_name = [get_game_property("character_properties", "character_data", i, "name") for i in count_list_items(characters_data)]
-characters_color = [get_game_property("character_properties", "character_data", i, "color") for i in count_list_items(characters_data)]
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.RESIZABLE | (pygame.FULLSCREEN if fullscreen else 0))
 clock = pygame.time.Clock()
 pygame.display.set_icon(pygame.image.load(load_asset("icon.ico")))
