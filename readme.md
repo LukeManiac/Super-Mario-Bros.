@@ -2,11 +2,7 @@
 
 ## Overview
 
-Welcome to **Super Mario Bros. for Python**, a fully-fledged recreation of the legendary **Super Mario Bros.** game, built entirely in Python.
-This project, passionately developed by **LukeManiac** (yes, that's me!), is a personal take on bringing the magic of one of the most beloved platformers of all time into the world of Python programming.
-The game is powered by the **`pygame` library**, which provides robust tools for handling rendering, player input, and audio management, ensuring smooth gameplay and a faithful retro experience.
-From **jumping over Goombas** to **smashing bricks for coins**, every fundamental mechanic of the classic game has been carefully implemented to provide a nostalgic yet customizable experience.
-Whether you're here to **relive the classic Mario experience**, **tinker with Python game development**, or even **mod the game to add your own creative touch**, this project is designed to be fun, flexible, and endlessly expandable!
+Welcome to **Super Mario Bros. for Python**, a fully-fledged recreation of the legendary **Super Mario Bros.** game, built entirely in Python. This project, passionately developed by **LukeManiac** (yes, that's me!), is a personal take on bringing the magic of one of the most beloved platformers of all time into the world of Python programming. The game is powered by the **`pygame` library**, which provides robust tools for handling rendering, player input, and audio management, ensuring smooth gameplay and a faithful retro experience. From **jumping over Goombas** to **smashing bricks for coins**, every fundamental mechanic of the classic game has been carefully implemented to provide a nostalgic yet customizable experience. Whether you're here to **relive the classic Mario experience**, **tinker with Python game development**, or even **mod the game to add your own creative touch**, this project is designed to be fun, flexible, and endlessly expandable!
 
 ---
 
