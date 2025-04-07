@@ -103,12 +103,8 @@ def create_course(data):
         "star_music": f"{main_music}_star" if exists(f"{main_music}_star") else "star",
     }
 
-    if key_exists(data, "music") and isinstance(data["music"], dict):
-        for key in default_music:
-            globals()[key] = data["music"].get(key, default_music[key])
-    else:
-        for key, value in default_music.items():
-            globals()[key] = value
+    for key, value in default_music.items():
+        globals()[key] = value
     
     tiles = []
 
@@ -138,21 +134,24 @@ def create_course(data):
             globals()["castle"] = castle_obj
 
     if key_exists(data, "width") and isinstance(data["width"], int):
-        globals()["x_range"] = (data["width"] - (SCREEN_WIDTH // 16)) * 16
+        globals()["x_range"] = (data["width"] - (SCREEN_WIDTH / 16)) * 16
 
-    globals()["y_range"] = ((data["height"] - SCREEN_WIDTH // 16) if key_exists(data, "height") and isinstance(data["height"], int) else 25) * 16
+    globals()["y_range"] = (data["height"] if key_exists(data, "height") and isinstance(data["height"], int) else 25) * 16
 
     if key_exists(data, "timelimit") and isinstance(data["timelimit"], int):
         globals()["time"] = 100 if nitpicks["hurry_mode"] else data["timelimit"]
         globals()["course_time"] = 100 if nitpicks["hurry_mode"] else data["timelimit"]
 
     if key_exists(data, "spawnpositions") and isinstance(data["spawnpositions"], list):
-        globals()["spawnposx"], globals()["spawnposy"] = data["spawnpositions"]
+        globals()["spawnposx"] = data["spawnpositions"][0] * 16 + 2
+        globals()["spawnposy"] = data["spawnpositions"][1] * 16
     
     globals()["tiles"] = tiles
 
+    globals()["underwater"] = key_exists(data, "underwater") and data["underwater"] == True
+
     for category, items in data.items():
-        if key_exists(("music", "tiles", "spriteset", "spawnpositions", "castle"), category):
+        if key_exists(("tiles", "castle"), category):
             continue
 
         object_list = []
@@ -357,7 +356,7 @@ class BGMPlayer:
             pygame.mixer.music.load(self.music)
             pygame.mixer.music.play(-1 if self.loop_point == True else 0)
             self.set_volume(mus_vol)
-            if not self.loop_point == 0:
+            if isinstance(self.loop_point, int) and not self.loop_point == 0:
                 self.loop_point /= 1000
                 self.music_playing = True
             else:
@@ -729,14 +728,19 @@ class Tile:
                         self.right_collide = True
                         self.top_collide = True
                         self.bottom_collide = True
-                    if key_exists([Mushroom, FireFlower], self.item):
-                        self.item = Mushroom if self.player.size == 0 and not nitpicks["non-progressive_powerups"] else FireFlower
-                    if not str(self.item) == "MultiCoin":
-                        self.item_spawned = True
-                        if self.item == CoinAnimation:
-                            particles.append(CoinAnimation(self.og_x, self.og_y - 1, spriteset=self.spriteset, sprout=False))
-                        else:
-                            items.append(self.item(self.og_x, self.og_y - (0.625 if self.item_spawn_anim else 1), spriteset=self.spriteset, sprout=self.item_spawn_anim))
+                    if self.item == Mushroom:
+                        if nitpicks["non-progressive_powerups"] or (self.player and not self.player.size == 0):
+                            self.item = FireFlower
+                    else:
+                        if not str(self.item) == "MultiCoin":
+                            self.item_spawned = True
+                            if not self.item == CoinAnimation:
+                                if ((getattr(self.item if not isinstance(self.item, type) else self.item(0, SCREEN_HEIGHT), "progressive", False) and self.player and self.player.size == 0) and not nitpicks["non-progressive_powerups"]):
+                                    self.item = Mushroom
+                    if self.item == CoinAnimation:
+                        particles.append(CoinAnimation(self.og_x, self.og_y - 1, spriteset=self.spriteset, sprout=False))
+                    else:
+                        items.append(self.item(self.og_x, self.og_y - (0.625 if self.item_spawn_anim else 1), spriteset=self.spriteset, sprout=self.item_spawn_anim))
                     if self.item_sound is not None:
                         sound_player.play_sound(self.item_sound)
             self.y_offset += self.bounce_speed
@@ -761,6 +765,7 @@ class Tile:
             debris.append(BrickDebris(self.x, self.y, -1, 0, self.spriteset))
             debris.append(BrickDebris(self.x, self.y, 1, 0, self.spriteset))
             sound_player.play_sound(break_sound)
+            points += 50
 
     def break_block(self):
         if self.item is None:
@@ -968,6 +973,7 @@ class OneUp(Mushroom):
 class FireFlower:
     def __init__(self, x, y, sprout=False, spriteset=1):
         self.x, self.y = x * 16, y * 16 + 8 + (8 if sprout else 0)
+        self.progressive = True
         self.spriteset = spriteset - (0 if sprout else 1)
         self.sprite = load_sprite("fireflower")
         self.sprite_size = self.sprite.get_size()
@@ -1379,6 +1385,13 @@ class Koopa:
                     self.speedx *= -1
                     if self.stomped:
                         sound_player.play_sound(bump_sound)
+                    if tile.item is not None:
+                        tile.bouncing = True
+                        tile.bounce_speed = -1
+                        tile.y_offset = 0
+                        tile.player = None
+                    if tile.breakable and tile.item is None:
+                        tile.break_block()
                     break
 
             self.y += self.speedy
@@ -1500,7 +1513,7 @@ class Player:
         self.quad_height = self.properties["quad_height"]
         self.frame_data = {}
         self.prev_key = 0
-        for key in ["idle", "crouch", "crouchfall", "walk", "skid", "jump", "fall", "run", "runjump", "runfall", "dead", "pipe", "climb", "fire"]:
+        for key in ["idle", "crouch", "crouchfall", "walk", "skid", "jump", "fall", "run", "runjump", "runfall", "dead", "pipe", "climb", "swim", "swimpush", "fire"]:
             self.frame_data[key] = self.frame_group[key] + self.prev_key
             self.prev_key = self.frame_data[key]
         self.spritesheet = load_sprite(f"p{player_number + 1}")
@@ -2058,7 +2071,7 @@ class Player:
                 self.dead = True
                 self.dead_speed = 0
 
-            self.skidding = (self.fall_timer < self.fall_duration and ((self.speedx < 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)) and nor(self.down, 0 <= self.anim_state <= self.frame_data["idle"], abs(self.speedx) < MIN_SPEEDX))
+            self.skidding = (self.fall_timer < self.fall_duration and ((self.speedx < 0 and self.facing_right and self.right and not self.left) or (self.speedx > 0 and not self.facing_right and self.left and not self.right)) and nor(self.down, 0 <= self.anim_state <= self.frame_data["idle"], abs(self.speedx) < MIN_SPEEDX))
 
             if self.on_ground:
                 self.speedy = 0
@@ -2089,7 +2102,7 @@ class Player:
             self.anim_state = self.frame_data["crouch" if self.falling_condition else "idle"] + ((int(((self.crouch_fall_timer if self.falling_condition else self.crouch_timer) if self.sync_crouch else self.crouch_timer) * self.frame_speeds["crouchfall" if self.falling_condition else "crouch"]) % self.frame_group["crouchfall" if self.falling_condition else "crouch"]) if self.frame_loops["crouchfall" if self.falling_condition else "crouch"] else min(int(((self.crouch_fall_timer if self.falling_condition else self.crouch_timer) if self.sync_crouch else self.crouch_timer) * self.frame_speeds["crouchfall" if self.falling_condition else "crouch"]), self.frame_group["crouchfall" if self.falling_condition else "crouch"] - 1))
             self.frame_timer = 0
         elif self.size == 2 and 0 < self.fire_timer < self.fire_duration and not self.fire_lock:
-            self.anim_state = self.frame_data["climb"] + int((self.fire_timer * self.frame_group["fire"]) / self.fire_duration)
+            self.anim_state = self.frame_data["swimpush"] + int((self.fire_timer * self.frame_group["fire"]) / self.fire_duration)
             self.frame_timer = 0
         elif self.skidding:
             self.anim_state = self.frame_data["walk"] + ((int(self.skid_timer * self.frame_speeds["skid"]) % self.frame_group["skid"]) if self.frame_loops["skid"] else min(int(self.skid_timer * self.frame_speeds["skid"]), self.frame_group["skid"] - 1))
@@ -2300,6 +2313,7 @@ current_bind = False
 game_ready = False
 exit_ready = False
 reset_ready = False
+underwater = False
 game = False
 everyone_dead = False
 numerical_change = 0.05
