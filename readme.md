@@ -149,7 +149,7 @@ This project is licensed under the **MIT License**, meaning you are free to **mo
 1. **Fork the repository** on GitHub.
 2. **Create a new branch** for your changes.
 3. **Make your modifications** (fix bugs, add features, improve performance, etc.).
-4. **Submit a pull request**, and I’ll review your contributions!
+4. **Submit a pull request**, and I’ll review your contributions! *I hope...*
 
 ---
 
