@@ -765,7 +765,7 @@ class Tile:
             debris.append(BrickDebris(self.x, self.y, -1, 0, self.spriteset))
             debris.append(BrickDebris(self.x, self.y, 1, 0, self.spriteset))
             sound_player.play_sound(break_sound)
-            points += 50
+            globals()["score"] += 50
 
     def break_block(self):
         if self.item is None:
