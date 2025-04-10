@@ -17,14 +17,17 @@ main_directory = dirname(abspath(__file__))
 def load_local_file(file):
     return f"{main_directory}/{file}"
 
-def load_json(path):
-    with open(load_local_file(f"{path}.json"), "r") as file:
-        return json.load(file)
+def load_json(path, *keys):
+    with open(load_local_file(f"{path}.json")) as file:
+        json_file = json.load(file)
+    for key in keys:
+        json_file = json_file[key]
+    return json_file
 
 asset_directory = "assets"
 
 try:
-    asset_directory = load_json("settings")["asset_directory"]
+    asset_directory = load_json("settings", "asset_directory")
     if not isinstance(asset_directory, str):
         raise CustomError("SaveDataError", f"Invalid type for 'asset_directory' in settings.json: expected str, got {type(asset_directory).__name__}.")
 except:
@@ -33,8 +36,8 @@ except:
 old_asset_directory = asset_directory
 
 def restart():
-    subprocess.Popen(f'"{sys.executable}" "{sys.argv[0]}"')
-    sys.exit()
+    subprocess.Popen(f'"{sys.executable}" "{sys.argv[0]}"', shell=True)
+    sys.exit("In order to properly load textures, the program must be restarted. Loading the textures without restarting could bug out the game resources.")
 
 def get_folders(directory):
     return [folder for folder in listdir(load_local_file(directory))]
@@ -214,6 +217,20 @@ def recolor_surface(surface, old_color, new_color):
     del pixel_array
     return recolored
 
+def scale_image(image, scale_factor=1):
+    if isinstance(scale_factor, (int, float)):
+        new_width = int(image.get_width() * abs(scale_factor))
+        new_height = int(image.get_height() * abs(scale_factor))
+    elif isinstance(scale_factor, (list, tuple)) and len(scale_factor) == 2:
+        new_width = int(image.get_width() * abs(scale_factor[0]))
+        new_height = int(image.get_height() * abs(scale_factor[1]))
+    else:
+        raise ValueError(f"Invalid type for 'scale_factor': expected int, float, list, or tuple, got {type(scale_factor).__name__}.")
+
+    new_surface = pygame.Surface((new_width * 2, new_height * 2), pygame.SRCALPHA)
+    new_surface.blit(pygame.transform.scale(image, (new_width, new_height)), ((((new_width * 2) - new_width) / 2) - (image.get_width() / 2), (((new_height * 2) - new_height) / 2) - (image.get_height() / 2)))
+    return new_surface
+
 def initialize_game():
     globals()["menu"] = False
     globals()["pause"] = False
@@ -349,10 +366,10 @@ class BGMPlayer:
             self.music = load_asset(f"music/{music}.ogg")
             try:
                 self.loop_point = get_game_property("loop_points", music)
-                if isinstance(self.loop_point, str):
-                    raise CustomError("LoopPointError", f"Expected numeric loop point, got string: {self.loop_point}")
             except KeyError:
                 self.loop_point = False
+            if nor(isinstance(self.loop_point, (int, bool)), self.loop_point is None):
+                raise CustomError("LoopPointError", f"Invalid type for 'loop_points' in {asset_directory}/loop_points.json: expected int, got {type(self.loop_point).__name__}.")
             pygame.mixer.music.load(self.music)
             pygame.mixer.music.play(-1 if self.loop_point == True else 0)
             self.set_volume(mus_vol)
@@ -706,6 +723,9 @@ class Tile:
         self.player = None
         self.coin_block_timer = 0
         self.coins = 0
+        self.position = (self.x - camera.x, self.y - camera.y)
+        self.image_scale = 1
+        self.sprite = None
 
     def update(self):
         if self.coins > 0 and not self.item_spawned:
@@ -735,14 +755,21 @@ class Tile:
                         if not str(self.item) == "MultiCoin":
                             self.item_spawned = True
                             if not self.item == CoinAnimation:
-                                if ((getattr(self.item if not isinstance(self.item, type) else self.item(0, SCREEN_HEIGHT), "progressive", False) and self.player and self.player.size == 0) and not nitpicks["non-progressive_powerups"]):
+                                if ((getattr(self.item(infinity, infinity) if isinstance(self.item, type) else self.item, "progressive", False) and self.player and self.player.size == 0) and not nitpicks["non-progressive_powerups"]):
                                     self.item = Mushroom
                     if self.item == CoinAnimation:
                         particles.append(CoinAnimation(self.og_x, self.og_y - 1, spriteset=self.spriteset, sprout=False))
+                    elif str(self.item) == "MultiCoin":
+                        if self.y_offset == 0 and self.bounce_speed == -1:
+                            tile.coins += 1
+                            tile.item_spawned = tile.coin_block_timer >= 5 or tile.coins >= 10
+                            particles.append(CoinAnimation(tile.og_x, tile.og_y - 1, spriteset=tile.spriteset, sprout=False))
                     else:
                         items.append(self.item(self.og_x, self.og_y - (0.625 if self.item_spawn_anim else 1), spriteset=self.spriteset, sprout=self.item_spawn_anim))
+                        self.item_spawned = True
                     if self.item_sound is not None:
                         sound_player.play_sound(self.item_sound)
+
             self.y_offset += self.bounce_speed
             self.bounce_speed += 0.25
 
@@ -766,6 +793,18 @@ class Tile:
             debris.append(BrickDebris(self.x, self.y, 1, 0, self.spriteset))
             sound_player.play_sound(break_sound)
             globals()["score"] += 50
+        
+        self.image_scale = 1 - (self.y_offset / 8)
+        try:
+            self.sprite = scale_image(self.image.subsurface(self.sprites[self.spriteset]), self.image_scale)
+        except:
+            self.sprite = None
+
+    def bump(self, player=None):
+        self.bouncing = True
+        self.bounce_speed = -1
+        self.y_offset = 0
+        self.player = player
 
     def break_block(self):
         if self.item is None:
@@ -773,8 +812,8 @@ class Tile:
             self.bouncing = True
 
     def draw(self):
-        if 0 <= self.spriteset < self.rows:
-            screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y + (self.y_offset * (-1 if nitpicks["inverted_block_bounce"] else 1))))
+        if 0 <= self.spriteset < self.rows and nor(self.sprite is None, self.broken):
+            screen.blit(self.sprite, (self.x - camera.x - (self.sprite.get_width() / 2) + 16, self.y - camera.y + (self.y_offset * (1 if nitpicks["inverted_block_bounce"] else 2.5))))
 
 class Ground(Tile):
     def __init__(self, x, y, spriteset=1):
@@ -798,13 +837,10 @@ class AnimatedTile(Tile):
     def update(self):
         super().update()
         self.frame_index = int((dt / (60 / self.cols) / self.anim_speed) % self.total_frames)
-
-    def draw(self):
-        if 0 <= self.spriteset < self.rows and nor(self.image is None, self.broken):
-            screen.blit(
-                self.image.subsurface(self.sprites[self.spriteset if not self.hit else 0][self.frame_index if nor(self.broken, self.hit) else 0]),
-                (self.x - camera.x, self.y - camera.y + (self.y_offset * (-1 if nitpicks["inverted_block_bounce"] else 1)))
-            )
+        try:
+            self.sprite = scale_image(self.image.subsurface(self.sprites[self.spriteset if not self.hit else 0][self.frame_index if nor(self.broken, self.hit) else 0]), self.image_scale)
+        except:
+            self.sprite = None
 
 class Brick(AnimatedTile):
     def __init__(self, x, y, item=None, item_spawn_anim=True, spriteset=1, item_sound=sprout_sound):
@@ -1385,13 +1421,10 @@ class Koopa:
                     self.speedx *= -1
                     if self.stomped:
                         sound_player.play_sound(bump_sound)
-                    if tile.item is not None:
-                        tile.bouncing = True
-                        tile.bounce_speed = -1
-                        tile.y_offset = 0
-                        tile.player = None
-                    if tile.breakable and tile.item is None:
-                        tile.break_block()
+                        if tile.item is not None:
+                            tile.bump()
+                        if tile.breakable and tile.item is None:
+                            tile.break_block()
                     break
 
             self.y += self.speedy
@@ -1589,6 +1622,7 @@ class Player:
         self.clear = False
         self.kicked_shell = False
         self.kicked_timer = 0
+        self.kicked_duration = 0.5
         self.update_hitbox()
 
     def add_life(self):
@@ -1635,18 +1669,12 @@ class Player:
                 self.dead_music = True
                 if self.dead_timer >= 150 and self.lives > 0 and not everyone_dead:
                     furthest_player = max([player for player in players if not player.dead], key=lambda player: player.rect.x)
-                    self.size = 0
+                    self.__init__(self.rect.x, self.rect.y, self.lives, player_number=self.player_number)
                     self.rect.x = furthest_player.rect.x
                     self.rect.bottom = furthest_player.rect.bottom
-                    self.speedx = 0
-                    self.speedy = 0
                     self.fall_timer = 0 if furthest_player.fall_timer < furthest_player.fall_duration else self.fall_duration
                     self.jump_timer = 0 if furthest_player.fall_timer < furthest_player.fall_duration else 1
                     self.shrunk = True
-                    self.anim_state = 0
-                    self.dead_timer = 0
-                    self.dead_music = False
-                    self.dead = False
         else:
             self.left = (keys[self.controls["left"]]) if self.controls_enabled and self.can_control and not self.piping else False
             self.right = (keys[self.controls["right"]]) if self.controls_enabled and self.can_control and not self.piping else False
@@ -1658,7 +1686,7 @@ class Player:
 
             if self.kicked_shell:
                 self.kicked_timer += 1
-                if self.kicked_timer >= 20:
+                if self.kicked_timer >= self.kicked_duration * 60:
                     self.kicked_shell = False
                     self.kicked_timer = 0
 
@@ -1912,16 +1940,9 @@ class Player:
                                 sound_player.play_sound(bump_sound)
 
                                 if tile.bonk_bounce:
-                                    tile.bouncing = True
-                                    tile.bounce_speed = -1
-                                    tile.y_offset = 0
-                                    tile.player = self
+                                    tile.bump(self)
                                 if not self.size == 0:
                                     tile.break_block()
-                                if str(tile.item) == "MultiCoin":
-                                    tile.coins += 1
-                                    tile.item_spawned = tile.coin_block_timer >= 5 or tile.coins >= 10
-                                    particles.append(CoinAnimation(tile.og_x, tile.og_y - 1, spriteset=tile.spriteset, sprout=False))
 
             for enemy in enemies:
                 if self.rect.colliderect(enemy.rect) and not self.size_change:
@@ -1992,7 +2013,7 @@ class Player:
                                         overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y))
                                         sound_player.play_sound(shot_sound)
                                     else:
-                                        if not self.shrunk:
+                                        if self.kicked_timer == 0 and not self.shrunk:
                                             if self.size == 0:
                                                 self.dead_speed = -5
                                                 self.dead = True
@@ -2127,8 +2148,8 @@ class Player:
         if self.can_draw:
             sprite = self.spritesheet.subsurface(self.sprites[self.size][self.anim_state])
             sprite = pygame.transform.flip(sprite, xor((not self.facing_right), nitpicks["moonwalking_mario"]), False)
-            draw_x = self.rect.x - camera.x - 4 - ((self.quad_width - 20) / 2)
-            draw_y = self.rect.y - camera.y + self.rect.height - 34
+            draw_x = self.rect.x - camera.x - ((self.quad_width - self.rect.width) / 2)
+            draw_y = self.rect.y - camera.y + self.rect.height - self.quad_height + 1
             screen.blit(sprite, (draw_x, draw_y))
 
             if self.star:
@@ -2148,16 +2169,16 @@ class Player:
                     (255, 0, 128)
                 ]
                 cycle_time = 2 if self.star_timer >= 1 else 1
+                cycle_speed = 1.25
 
                 if pause:
                     color_index = self.last_color_index if hasattr(self, 'last_color_index') else 0
                 else:
                     self.time_passed = pygame.time.get_ticks()
-                    color_index = int((self.time_passed % (1250 / cycle_time)) / ((1250 / cycle_time) / len(colors)))
+                    color_index = int((self.time_passed % ((cycle_speed * 1000) / cycle_time)) / (((cycle_speed * 1000) / cycle_time) / len(colors)))
                     self.last_color_index = color_index
 
-                current_color = colors[color_index]
-                star_mask.fill(current_color, special_flags=pygame.BLEND_RGBA_MULT)
+                star_mask.fill(colors[color_index], special_flags=pygame.BLEND_RGBA_MULT)
                 screen.blit(star_mask, (draw_x, draw_y))
 
 mus_vol = snd_vol = 1
@@ -2321,14 +2342,13 @@ fade_in = False
 fade_out = False
 
 if exists(load_local_file("settings.json")) and not getsize(load_local_file("settings.json")) == 0:
-    data = load_json("settings")
-    mus_vol = data["mus_vol"]
-    snd_vol = data["snd_vol"]
-    fullscreen = data["fullscreen"]
+    mus_vol = load_json("settings", "mus_vol")
+    snd_vol = load_json("settings", "snd_vol")
+    fullscreen = load_json("settings", "fullscreen")
 
-    for key in data:
+    for key in load_json("settings"):
         if key.startswith("controls"):
-            globals()[key] = data[key]
+            globals()[key] = load_json("settings", key)
 
 players_ready = 1
 players_controls = 1
@@ -2574,10 +2594,19 @@ while running:
                     color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
                 )
 
-                if selected_menu_index == 1:
+                if selected_menu_index == 1 and len(textures_list) >= 1:
                     text.create_text(
                         text="PRESS LEFT OR RIGHT\nTO SWITCH BETWEEN TEXTURES",
                         position=(centerx, centery * 1.125),
+                        alignment="center",
+                        stickxtocamera=True,
+                        scale=0.5
+                    )
+
+                elif len(textures_list) == 0:
+                    text.create_text(
+                        text="NO TEXTURES FOUND, PLEASE COPY THE ASSETS FOLDER TO THE TEXTURES FOLDER",
+                        position=(centerx, centery * 1.25),
                         alignment="center",
                         stickxtocamera=True,
                         scale=0.5
@@ -2670,10 +2699,18 @@ while running:
                     player.draw()
 
         for tile in tiles:
+            if tile.bouncing:
+                continue
             tile.draw()
             if not pause:
                 tile.update()
-        
+
+        for tile in tiles:
+            if tile.bouncing:
+                tile.draw()
+            if not pause:
+                tile.update()
+
         for fireball_list in fireballs_table.values():
             for fireball in fireball_list[:]:
                 if fireball.is_visible():
@@ -2979,8 +3016,17 @@ while running:
                                 old_asset_directory = asset_directory
                                 asset_directory = "assets"
                             elif selected_menu_index == 1:
-                                old_asset_directory = asset_directory
-                                asset_directory = f"textures/{textures_list[selected_texture - 1]}"
+                                if len(textures) == 0:
+                                    selected_menu_index = old_selected_menu_index = 0
+                                    menu_area = 2
+                                    sound_player.play_sound(coin_sound)
+                                else:
+                                    old_asset_directory = asset_directory
+                                    asset_directory = f"textures/{textures_list[selected_texture - 1]}"
+                            else:
+                                selected_menu_index = old_selected_menu_index = 0
+                                menu_area = 2
+                                sound_player.play_sound(coin_sound)
                         elif key_exists(title_screen[3:], menu_options) and not binding_key:
                             if selected_menu_index == 7:
                                 selected_menu_index = old_selected_menu_index = 0
