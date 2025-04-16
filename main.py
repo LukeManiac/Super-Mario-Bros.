@@ -1,7 +1,8 @@
-import pygame, json, math, numpy, psutil, sys, subprocess
-from os.path import dirname, abspath, exists, getsize
+import pygame, json, math, numpy, psutil, sys
+from os.path import dirname, abspath, exists, getsize, isdir
 from os import listdir, makedirs
 from datetime import datetime
+from subprocess import Popen as open_program
 
 class CustomError(Exception):
     def __init__(self, name, message):
@@ -12,7 +13,7 @@ pygame.font.init()
 pygame.mixer.init()
 
 infinity = float("inf")
-main_directory = dirname(abspath(__file__))
+main_directory = dirname(sys.executable if getattr(sys, 'frozen', False) else abspath(__file__))
 
 def load_local_file(file):
     return f"{main_directory}/{file}"
@@ -20,14 +21,20 @@ def load_local_file(file):
 def load_json(path, *keys):
     with open(load_local_file(f"{path}.json")) as file:
         json_file = json.load(file)
+
     for key in keys:
         json_file = json_file[key]
+
     return json_file
 
 asset_directory = "assets"
 
 try:
     asset_directory = load_json("settings", "asset_directory")
+
+    if not isdir(asset_directory):
+        asset_directory = "assets"
+
     if not isinstance(asset_directory, str):
         raise CustomError("SaveDataError", f"Invalid type for 'asset_directory' in settings.json: expected str, got {type(asset_directory).__name__}.")
 except:
@@ -36,7 +43,7 @@ except:
 old_asset_directory = asset_directory
 
 def restart():
-    subprocess.Popen(f'"{sys.executable}" "{sys.argv[0]}"', shell=True)
+    open_program(f'"{sys.executable}" "{sys.argv[0]}"', shell=True)
     sys.exit("In order to properly load textures, the program must be restarted. Loading the textures without restarting could bug out the game resources.")
 
 def get_folders(directory):
@@ -108,9 +115,14 @@ def create_course(data):
 
     for key, value in default_music.items():
         globals()[key] = value
+
+    globals()["background"] = data["background"] if key_exists(data, "background") and isinstance(data["background"], str) else "ground"
+    globals()["y_range"] = (data["height"] if key_exists(data, "height") and isinstance(data["height"], int) else 25) * 16
+    globals()["time"] = 100 if nitpicks["hurry_mode"] else (data["timelimit"] if key_exists(data, "timelimit") and isinstance(data["timelimit"], int) else 400)
+    globals()["course_time"] = 100 if nitpicks["hurry_mode"] else (data["timelimit"] if key_exists(data, "timelimit") and isinstance(data["timelimit"], int) else 400)
+    globals()["underwater"] = key_exists(data, "underwater") and data["underwater"] == True
     
     tiles = []
-
     if key_exists(data, "tiles") and isinstance(data["tiles"], dict):
         for class_name, params_list in data["tiles"].items():
             if class_name == "Pipe":
@@ -124,7 +136,9 @@ def create_course(data):
                     ]
                     obj = globals()[class_name](*obj_params)
                     if hasattr(obj, "spriteset"):
-                        obj.spriteset = data.get("spriteset", 0)
+                        obj.spriteset = (1 if hasattr(obj, "is_ground") and obj.is_ground else data.get("spriteset", 1)) - 1
+                        if hasattr(obj, "tileset"):
+                            obj.tileset = data["tileset"] if key_exists(data, "tileset") and isinstance(data["tileset"], str) else "ground"
 
                     tiles.append(obj)
 
@@ -133,28 +147,20 @@ def create_course(data):
 
         if key_exists(globals(), "Castle") and callable(globals()["Castle"]):
             castle_obj = globals()["Castle"](*data["castle"])
-            castle_obj.spriteset = data.get("spriteset", 0)
+            castle_obj.spriteset = data.get("spriteset", 1) - 1
             globals()["castle"] = castle_obj
 
     if key_exists(data, "width") and isinstance(data["width"], int):
         globals()["x_range"] = (data["width"] - (SCREEN_WIDTH / 16)) * 16
 
-    globals()["y_range"] = (data["height"] if key_exists(data, "height") and isinstance(data["height"], int) else 25) * 16
-
-    if key_exists(data, "timelimit") and isinstance(data["timelimit"], int):
-        globals()["time"] = 100 if nitpicks["hurry_mode"] else data["timelimit"]
-        globals()["course_time"] = 100 if nitpicks["hurry_mode"] else data["timelimit"]
+    globals()["tiles"] = tiles
 
     if key_exists(data, "spawnpositions") and isinstance(data["spawnpositions"], list):
         globals()["spawnposx"] = data["spawnpositions"][0] * 16 + 2
-        globals()["spawnposy"] = data["spawnpositions"][1] * 16
-    
-    globals()["tiles"] = tiles
-
-    globals()["underwater"] = key_exists(data, "underwater") and data["underwater"] == True
+        globals()["spawnposy"] = (data["spawnpositions"][1] - 4) * 16
 
     for category, items in data.items():
-        if key_exists(("tiles", "castle"), category):
+        if key_exists(("tiles", "castle", "background", "tileset"), category):
             continue
 
         object_list = []
@@ -168,7 +174,7 @@ def create_course(data):
                         ]
                         obj = globals()[class_name](*obj_params)
                         if hasattr(obj, "spriteset"):
-                            obj.spriteset = data.get("spriteset", 0)
+                            obj.spriteset = data.get("spriteset", 1) - 1
 
                         object_list.append(obj)
 
@@ -197,7 +203,7 @@ def create_pipe(x, y, length=2, can_enter=False, new_zone=None, pipe_dir="up", c
                 pipe_id -= 2
 
             px, py = coord_adjustments[pipe_dir](i, j)
-            pipes.append(Tile(px, py, f"pipe{id_adjustments[pipe_dir](pipe_id)}", color))
+            pipes.append(Tile(px, py, split_image(load_sprite("pipe"), 16)[id_adjustments[pipe_dir](pipe_id) - 1], color))
             if can_enter and i == 0 and j == 0:
                 pipe_markers.append(PipeMarker(px + (0.5 if pipe_dir == "up" or pipe_dir == "down" else 0), py + (1 if pipe_dir == "left" or pipe_dir == "right" else 0), pipe_dir, new_zone))
 
@@ -230,6 +236,20 @@ def scale_image(image, scale_factor=1):
     new_surface = pygame.Surface((new_width * 2, new_height * 2), pygame.SRCALPHA)
     new_surface.blit(pygame.transform.scale(image, (new_width, new_height)), ((((new_width * 2) - new_width) / 2) - (image.get_width() / 2), (((new_height * 2) - new_height) / 2) - (image.get_height() / 2)))
     return new_surface
+
+def split_image(image, cols=1, rows=1):
+    image_width, image_height = image.get_size()
+    cell_width = image_width // cols
+    cell_height = image_height // rows
+    cells = []
+
+    for row in range(rows):
+        for col in range(cols):
+            surface = pygame.Surface((cell_width, cell_height), pygame.SRCALPHA)
+            surface.blit(image, (0, 0), (col * cell_width, row * cell_height, cell_width, cell_height))
+            cells.append(surface)
+
+    return cells
 
 def initialize_game():
     globals()["menu"] = False
@@ -299,9 +319,11 @@ class PipeMarker:
         elif pipe_dir == "down":
             self.y += 1
         elif pipe_dir == "left":
-            self.x -= 1
-        elif pipe_dir == "right":
             self.x += 1
+            self.y -= 16
+        elif pipe_dir == "right":
+            self.x -= 1
+            self.y -= 16
         self.pipe_dir = pipe_dir
         self.zone = zone
         self.rect = pygame.Rect(self.x, self.y, 16, 16)
@@ -430,7 +452,7 @@ class Text:
             text_height *= scale
 
             if scale != 1.0:
-                text_surface = pygame.transform.scale(text_surface, (int(text_width), int(text_height)))
+                text_surface = pygame.transform.scale(text_surface, (text_width, text_height))
                 self.char_width = text_surface.get_width() * scale
                 self.char_height = text_surface.get_height() * scale
 
@@ -456,11 +478,9 @@ class Text:
 
             rendered_lines.append((text_surface, text_width, text_height))
 
-        line_height = max(text_height + 2, self.font_size * scale)
-
         for i, (text_surface, text_width, text_height) in enumerate(rendered_lines):
             line_x = x
-            line_y = y + i * line_height
+            line_y = y + i * (scale * self.char_height * self.font_size * 0.375)
 
             if alignment == "center":
                 line_x -= text_width // 2
@@ -543,13 +563,13 @@ class Logo:
 class TitleGround:
     def __init__(self):
         self.y = SCREEN_HEIGHT - 24
-        self.sprite = load_sprite("ground")
+        self.sprite = split_image(load_sprite("tiles_ground"), 8, 6)
 
     def draw(self):
-        offset_x = -camera.x % 16
-        for y in range(2):
-            for x in range(0, SCREEN_WIDTH + 32, 16):
-                screen.blit(self.sprite, (x + offset_x - 16, self.y + 16 * y - camera.y))
+        for i in range((SCREEN_WIDTH // 16) + 1):
+            x = i * 16
+            screen.blit(self.sprite[1], (x - (camera.x % 16), self.y - camera.y))
+            screen.blit(self.sprite[9], (x - (camera.x % 16), self.y + 16 - camera.y))
 
 class PowerMeter:
     def __init__(self, player):
@@ -641,21 +661,14 @@ class PlayerHUD:
     def update(self):
         self.player_number = self.player.player_number + 1
         self.size = max(self.player.size - 1, 0)
-        self.star = self.player.star
-        self.star_timer = self.player.star_timer
-        try:
-            self.last_color_index = self.player.last_color_index
-            self.time_passed = self.player.time_passed
-        except AttributeError:
-            pass
 
     def draw(self):
         try:
             sprite = self.image.subsurface(self.sprites[self.player_number - 1][self.size])
             sprite = pygame.transform.flip(sprite, nitpicks["moonwalking_mario"], False)
-            screen.blit(sprite, (12, 20 + self.player_number * 16))
+            screen.blit(sprite, (((self.sprite_size[0] // 2)) - 4, (((self.sprite_size[1] // len(characters_data))) + 4) + self.player_number * 16))
 
-            if self.star:
+            if player.star:
                 star_mask = sprite.copy()
                 colors = [
                     (255, 0, 0),
@@ -671,29 +684,32 @@ class PlayerHUD:
                     (255, 0, 255),
                     (255, 0, 128)
                 ]
-                cycle_time = 2 if self.star_timer >= 1 else 1
+                cycle_time = 2 if player.star_timer >= 1 else 1
 
                 if pause or everyone_dead:
-                    color_index = self.last_color_index if hasattr(player, 'last_color_index') else 0
+                    color_index = player.last_color_index if hasattr(player, 'last_color_index') else 0
                 else:
-                    self.time_passed = pygame.time.get_ticks()
-                    color_index = int((self.time_passed % (1250 / cycle_time)) / ((1250 / cycle_time) / len(colors)))
-                    self.last_color_index = color_index
+                    player.time_passed = pygame.time.get_ticks()
+                    color_index = int((player.time_passed % (1250 / cycle_time)) / ((1250 / cycle_time) / len(colors)))
+                    player.last_color_index = color_index
 
-                current_color = colors[color_index]
-                star_mask.fill(current_color, special_flags=pygame.BLEND_RGBA_MULT)
-                screen.blit(star_mask, (12, 20 + self.player_number * 16))
+                star_mask.fill(colors[color_index], special_flags=pygame.BLEND_RGBA_MULT)
+                screen.blit(star_mask, (((self.sprite_size[0] // 2)) - 4, (((self.sprite_size[1] // len(characters_data))) + 4) + self.player_number * 16))
         except AttributeError:
             pass
 
 class Tile:
-    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False, breakable=False, item=None, item_spawn_anim=True, item_sound=sprout_sound):
+    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False, breakable=False, item=None, item_spawn_anim=True, item_sound=sprout_sound, is_ground=False):
         self.x = x * 16
         self.y = y * 16 + 8
         self.og_x, self.og_y = x, y
-        self.spriteset = spriteset
-        self.img = image
-        self.image = load_sprite(image)
+        self.is_ground = is_ground
+        self.spriteset = 0 if self.is_ground else spriteset
+        self.original_image = image
+        try:
+            self.image = load_sprite(image)
+        except:
+            self.image = self.original_image
         self.img_width, self.img_height = self.image.get_size()
         self.tile_size = 16
         self.rect = pygame.Rect(x * 16, y * 16 + 8, self.tile_size, self.tile_size)
@@ -719,7 +735,7 @@ class Tile:
         self.can_break_now = False
         self.hit = False
         self.item_spawned = False
-        self.item_sound = None if self.item == CoinAnimation else item_sound
+        self.item_sound = None if self.item == CoinAnimation or str(self.item) == "MultiCoin" else item_sound
         self.player = None
         self.coin_block_timer = 0
         self.coins = 0
@@ -743,7 +759,7 @@ class Tile:
                     self.frame_index = 0
                     self.item = None
                 else:
-                    if self.img == "hiddenblock":
+                    if self.original_image == "hiddenblock":
                         self.left_collide = True
                         self.right_collide = True
                         self.top_collide = True
@@ -796,7 +812,7 @@ class Tile:
         
         self.image_scale = 1 - (self.y_offset / 8)
         try:
-            self.sprite = scale_image(self.image.subsurface(self.sprites[self.spriteset]), self.image_scale)
+            self.sprite = scale_image(self.image if self.is_ground else self.image.subsurface(self.sprites[self.spriteset]), self.image_scale)
         except:
             self.sprite = None
 
@@ -812,12 +828,12 @@ class Tile:
             self.bouncing = True
 
     def draw(self):
-        if 0 <= self.spriteset < self.rows and nor(self.sprite is None, self.broken):
-            screen.blit(self.sprite, (self.x - camera.x - (self.sprite.get_width() / 2) + 16, self.y - camera.y + (self.y_offset * (1 if nitpicks["inverted_block_bounce"] else 2.5))))
+        if nor(self.sprite is None, self.broken):
+            screen.blit(self.sprite, (self.x - camera.x - (self.sprite.get_width() / 2) + 16, self.y - camera.y + (0 if nitpicks["inverted_block_bounce"] else (self.y_offset * 4))))
 
 class Ground(Tile):
-    def __init__(self, x, y, spriteset=1):
-        super().__init__(x, y, "ground", spriteset)
+    def __init__(self, x, y, tile_index=1, tileset="ground"):
+        super().__init__(x, y, split_image(load_sprite(f"tiles_{tileset}"), 8, 6)[tile_index - 1], 0, is_ground=True)
 
 class HardBlock(Tile):
     def __init__(self, x, y, spriteset=1):
@@ -916,12 +932,12 @@ class Mushroom:
         self.frame_index = 0
         self.sprouting = sprout
         self.sprout_timer = 0
-        self.spriteset = spriteset - (0 if sprout else 1)
+        self.spriteset = spriteset
         self.sprite_size = self.sprite.get_size()
         self.frames = self.sprite_size[0] // 16
         self.quad_size = self.sprite_size[0] // self.frames
         self.spriteset_size = self.sprite_size[1] // 4
-        self.sprites = [[pygame.Rect(self.quad_size * i, self.spriteset_size * j, self.quad_size, self.spriteset_size) for i in range(4)] for j in range(self.frames)]
+        self.sprites = [[pygame.Rect(self.quad_size * i, self.spriteset_size * j, self.quad_size, self.spriteset_size) for i in range(self.frames)] for j in range(4)]
 
     def update(self):
         self.dt += 1
@@ -992,7 +1008,7 @@ class OneUp(Mushroom):
         self.frames = self.sprite_size[0] // 16
         self.quad_size = self.sprite_size[0] // self.frames
         self.spriteset_size = self.sprite_size[1] // 4
-        self.sprites = [[pygame.Rect(self.quad_size * i, self.spriteset_size * j, self.quad_size, self.spriteset_size) for i in range(4)] for j in range(self.frames)]
+        self.sprites = [[pygame.Rect(self.quad_size * i, self.spriteset_size * j, self.quad_size, self.spriteset_size) for i in range(self.frames)] for j in range(4)]
 
     def update(self):
         super().update()
@@ -1010,13 +1026,13 @@ class FireFlower:
     def __init__(self, x, y, sprout=False, spriteset=1):
         self.x, self.y = x * 16, y * 16 + 8 + (8 if sprout else 0)
         self.progressive = True
-        self.spriteset = spriteset - (0 if sprout else 1)
+        self.spriteset = spriteset
         self.sprite = load_sprite("fireflower")
         self.sprite_size = self.sprite.get_size()
         self.frames = self.sprite_size[0] // 16
         self.quad_size = self.sprite_size[0] // self.frames
         self.spriteset_size = self.sprite_size[1] // 4
-        self.sprites = [[pygame.Rect(self.quad_size * i, self.spriteset_size * j, self.quad_size, self.spriteset_size) for i in range(4)] for j in range(self.frames)]
+        self.sprites = [[pygame.Rect(self.quad_size * i, self.spriteset_size * j, self.quad_size, self.spriteset_size) for i in range(self.frames)] for j in range(4)]
         self.speedx = 0
         self.speedy = -0.5 if sprout else 0
         self.rect = pygame.Rect(self.x, self.y, 16, 16)
@@ -1087,7 +1103,7 @@ class Star:
         self.quad_size = self.sprite_size[0] // self.frames
         self.spriteset_size = self.sprite_size[1] // 4
         self.sprites = [[pygame.Rect(self.quad_size * i, self.spriteset_size * j, self.quad_size, self.spriteset_size) for i in range(4)] for j in range(self.frames)]
-        self.spriteset = spriteset - (0 if sprout else 1)
+        self.spriteset = spriteset
         self.frame_index = 0
         self.dt = 0
 
@@ -1153,14 +1169,15 @@ class Star:
 
 class Fireball:
     def __init__(self, player):
-        self.x = (player.rect.left + player.rect.right) / 2 - 4
+        self.x = (player.rect.left + player.rect.right) / 2 - (player.quad_width - player.rect.width)
         self.y = player.rect.top
         self.bounce = math.pi
         self.speedx = RUN_SPEED * (1.25 if player.facing_right else -1.25)
         self.speedy = self.bounce * (-1 if player.up else 1)
         self.rect = pygame.Rect(self.x, self.y, 8, 8)
         self.sprite = load_sprite("fireball")
-        self.sprites = [pygame.Rect(i * 16, 0, 16, 16) for i in range(4)]
+        self.sprite_width, self.sprite_height = self.sprite.get_size()
+        self.sprites = [pygame.Rect(i * (self.sprite_width // 4), 0, (self.sprite_width // 4), self.sprite_height) for i in range(4)]
         self.angle = 0
         self.frame_index = 0
         self.frame_timer = 0
@@ -1514,7 +1531,7 @@ class Koopa:
         return nor((self.y < camera.y + SCREEN_HEIGHT + self.rect.height), (self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
 
     def draw(self):
-        image = pygame.transform.rotate(self.sprite.subsurface(self.sprites[self.spriteset][self.frame_index + (2 if self.stomped or self.shotted else 0)]), self.angle)
+        image = pygame.transform.rotate(self.sprite.subsurface(self.sprites[self.spriteset][self.frame_index + (self.properties["frames"]["normal"] if self.stomped or self.shotted else 0)]), self.angle)
         image = pygame.transform.flip(image, xor((self.speedx > 0 and not self.shotted), nitpicks["moonwalking_enemies"]), False)
         screen.blit(image, (self.x - camera.x - (self.quad_width // 4), self.y - camera.y - (self.spr_height // 16) + 1))
 
@@ -1524,7 +1541,7 @@ class Castle:
         self.image = load_sprite("castle")
         self.image_width, self.image_height = self.image.get_size()
         self.x, self.y = x * 16, y * 16 - ((self.image_height // 4) - 24)
-        self.sprites = [pygame.Rect(0, self.image_height * i, self.image_width, self.image_height) for i in range(4)]
+        self.sprites = [pygame.Rect(0, (self.image_height // 4) * i, self.image_width, (self.image_height // 4)) for i in range(4)]
 
     def draw(self):
         screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y))
@@ -1559,9 +1576,9 @@ class Player:
         self.frame_timer = 0
         self.on_ground = False
         self.facing_right = True
+        self.pipe_anim_timer = 0
         self.crouch_timer = 0
         self.crouch_fall_timer = 0
-        self.pipe_timer = 0
         self.skid_timer = 0
         self.idle_timer = 0
         self.jumping_timer = 0
@@ -1617,7 +1634,8 @@ class Player:
         self.piping = False
         self.pipe_dir = False
         self.pipe_timer = 0
-        self.pipe_speed = 0.5
+        self.pipe_duration = 0.5
+        self.pipe_speed = 0.75
         self.pipe_marker = None
         self.clear = False
         self.kicked_shell = False
@@ -1718,7 +1736,7 @@ class Player:
                             self.piping = True
                             sound_player.play_sound(pipe_sound)
 
-                    elif self.up and self.rect.top + 2 >= pipe_marker.rect.bottom >= self.rect.top - 2 and pipe_marker.rect.left - 5 <= self.rect.x <= pipe_marker.rect.right - 9 and pipe_marker.pipe_dir == "down":
+                    elif self.up and self.fall_timer >= self.fall_duration and self.rect.top + 2 >= pipe_marker.rect.bottom >= self.rect.top - 2 and pipe_marker.rect.left - 5 <= self.rect.x <= pipe_marker.rect.right - 9 and pipe_marker.pipe_dir == "down":
                         self.speedx = 0
                         self.speedy = -self.pipe_speed
                         if self.pipe_marker is None:
@@ -1728,7 +1746,7 @@ class Player:
                             self.piping = True
                             sound_player.play_sound(pipe_sound)
 
-                    elif self.right and self.rect.right - 2 <= pipe_marker.rect.left <= self.rect.right + 2 and self.fall_timer < self.fall_duration and pipe_marker.pipe_dir == "left":
+                    elif self.right and self.rect.right - 2 <= pipe_marker.rect.left <= self.rect.right + 2 and self.fall_timer < self.fall_duration and pipe_marker.pipe_dir == "right":
                         self.speedx = self.pipe_speed
                         self.speedy = 0
                         if self.pipe_marker is None:
@@ -1738,7 +1756,7 @@ class Player:
                             self.piping = True
                             sound_player.play_sound(pipe_sound)
 
-                    elif self.left and self.rect.left - 2 <= pipe_marker.rect.right <= self.rect.left + 2 and self.fall_timer < self.fall_duration and pipe_marker.pipe_dir == "right":
+                    elif self.left and self.rect.left - 2 <= pipe_marker.rect.right <= self.rect.left + 2 and self.fall_timer < self.fall_duration and pipe_marker.pipe_dir == "left":
                         self.speedx = -self.pipe_speed
                         self.speedy = 0
                         if self.pipe_marker is None:
@@ -1749,12 +1767,13 @@ class Player:
                             sound_player.play_sound(pipe_sound)
 
             if self.piping:
-                self.pipe_timer = min(self.pipe_timer + 1, 60)
-                if self.pipe_timer <= 60:
-                    self.rect.x += self.speedx
-                    self.rect.y += self.speedy
+                if self.pipe_timer <= self.pipe_duration * 60:
+                    self.pipe_timer += 1
+                    if self.pipe_timer <= self.pipe_duration * 30:
+                        self.rect.x += self.speedx
+                        self.rect.y += self.speedy
                 if abs(self.speedx) < MIN_SPEEDX:
-                    self.anim_state = self.frame_data["dead"] + ((int(self.pipe_timer * self.frame_speeds["pipe"]) % self.frame_group["pipe"]) if self.frame_loops["pipe"] else min(int(self.pipe_timer * self.frame_speeds["pipe"]), self.frame_group["pipe"] + 1))
+                    self.anim_state = self.frame_data["dead"] + ((int(self.pipe_anim_timer * self.frame_speeds["pipe"]) % self.frame_group["pipe"]) if self.frame_loops["pipe"] else min(int(self.pipe_timer * self.frame_speeds["pipe"]), self.frame_group["pipe"] + 1))
                 else:
                     self.frame_timer += abs(self.speedx) / 1.25
                     self.anim_state = self.frame_data["crouchfall"] + ((int(self.frame_timer * self.frame_speeds["walk"]) % self.frame_group["walk"]) if self.frame_loops["walk"] else min(int(self.frame_timer * self.frame_speeds["walk"]), self.frame_group["walk"] - 1))
@@ -2083,8 +2102,8 @@ class Player:
 
             self.star_timer = (self.star_timer - 1/60) if self.star else 0
             if self.star and self.star_timer <= 0:
-                    self.star_timer = 0
-                    self.star = False
+                self.star_timer = 0
+                self.star = False
 
             self.rect.y = max(self.rect.y, camera.y)
 
@@ -2111,7 +2130,7 @@ class Player:
 
         self.crouch_timer = (self.crouch_timer + 1) if self.down and (self.sync_crouch and not self.falling_condition) else 0
         self.crouch_fall_timer = (self.crouch_fall_timer + 1) if self.down and self.falling_condition else 0
-        self.pipe_timer = (self.pipe_timer + 1) if self.piping else 0
+        self.pipe_anim_timer = (self.pipe_anim_timer + 1) if self.piping else 0
         self.skid_timer = (self.skid_timer + 1) if self.skidding else 0
         self.jumping_timer = (self.jumping_timer + 1) if self.speedy < 0 else 0
         self.idle_timer = (self.idle_timer + 1) if abs(self.speedx) < MIN_SPEEDX else 0
@@ -2335,6 +2354,8 @@ main_music = None
 star_music = None
 dead_music = None
 clear_music = None
+background = None
+tileset = None
 hud = None
 fade_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
 a = 255
@@ -2646,9 +2667,9 @@ while running:
                 player.walk_cutscene = True
 
     elif game:
-        if 0 < sum(1 for player in players if player.pipe_timer == 60) < len(players):
+        if 0 < sum(1 for player in players if player.pipe_timer == player.pipe_duration * 60) < len(players):
             pipe_wait_timer = (60 * (pipe_timer - 1)) if (sum(1 for player in players if player.dead_timer >= 30) == len(players) - 1) else min(pipe_wait_timer + 1, (60 * (pipe_timer - 1)))
-        elif sum(1 for player in players if player.pipe_timer == 60) == len(players):
+        elif sum(1 for player in players if player.pipe_timer == player.pipe_duration * 60) == len(players):
             pipe_wait_timer = (60 * (pipe_timer - 1))
 
         pipe_ready = pipe_wait_timer == (60 * (pipe_timer - 1))
@@ -2662,7 +2683,7 @@ while running:
         if nor(pause, everyone_dead, any(player.size_change for player in players), any(player.piping for player in players), any(player.clear for player in players), nitpicks["infinite_time"]):
             course_time = math.ceil(time - dt/60)
 
-        background_manager.load_background("ground")
+        background_manager.load_background(background)
         background_manager.update()
         background_manager.draw()
 
@@ -2883,7 +2904,7 @@ while running:
             position=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2),
             alignment="center"
         )
-        if dt >= 60 and not bgm_player.is_playing("gameover"):
+        if dt >= get_game_property("gameover_time"):
             text.create_text(
                 text="PRESS ANY KEY TO RESTART",
                 position=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 1.75),
@@ -2947,7 +2968,7 @@ while running:
                         fade_in = exit_ready = True
                         bgm_player.fade_out()
                         sound_player.play_sound(coin_sound)
-            if game_over and dt >= 60 and nor(bgm_player.is_playing("gameover"), game_ready):
+            if game_over and dt >= get_game_property("gameover_time"):
                 bgm_player.stop_music()
                 sound_player.stop_all_sounds()
                 sound_player.play_sound(coin_sound)
