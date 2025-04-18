@@ -1,4 +1,4 @@
-import pygame, json, math, numpy, psutil, sys
+import pygame, json, numpy, psutil, sys
 from os.path import dirname, abspath, exists, getsize, isdir
 from os import listdir, makedirs
 from datetime import datetime
@@ -13,7 +13,16 @@ pygame.font.init()
 pygame.mixer.init()
 
 infinity = float("inf")
+pi = 3.141592653589793
 main_directory = dirname(sys.executable if getattr(sys, 'frozen', False) else abspath(__file__))
+
+def floor(x):
+    i = int(x)
+    return i if x >= 0 or x == i else i - 1
+
+def ceil(x):
+    i = int(x)
+    return i if x == i or x < 0 else i + 1
 
 def load_local_file(file):
     return f"{main_directory}/{file}"
@@ -32,7 +41,7 @@ asset_directory = "assets"
 try:
     asset_directory = load_json("settings", "asset_directory")
 
-    if not isdir(asset_directory):
+    if not isdir(load_local_file(asset_directory)):
         asset_directory = "assets"
 
     if not isinstance(asset_directory, str):
@@ -41,10 +50,6 @@ except:
     pass
 
 old_asset_directory = asset_directory
-
-def restart():
-    open_program(f'"{sys.executable}" "{sys.argv[0]}"', shell=True)
-    sys.exit("In order to properly load textures, the program must be restarted. Loading the textures without restarting could bug out the game resources.")
 
 def get_folders(directory):
     return [folder for folder in listdir(load_local_file(directory))]
@@ -63,17 +68,35 @@ def get_game_property(*items):
     backup_data = load_json("assets/game_properties")
 
     for item in items:
-        if item in data:
-            data = data[item]
-        else:
-            try:
-                data = backup_data.get(item, None)
-            except:
-                data = backup_data[item]
-        try:
+        if isinstance(data, list):
+            if isinstance(item, int) and item < len(data):
+                data = data[item]
+            else:
+                data = backup_data[item] if isinstance(backup_data, list) and isinstance(item, int) and item < len(backup_data) else None
+        elif isinstance(data, dict):
+            if item not in data and isinstance(backup_data, dict) and item in backup_data:
+                data[item] = backup_data[item]
+            data = data.get(item, None)
+
+        if isinstance(backup_data, list):
+            backup_data = backup_data[item] if isinstance(item, int) and item < len(backup_data) else None
+        elif isinstance(backup_data, dict):
             backup_data = backup_data.get(item, None)
-        except:
-            backup_data = backup_data[item]
+
+    def deep_merge(a, b):
+        if isinstance(a, dict) and isinstance(b, dict):
+            for k in b:
+                a[k] = deep_merge(a[k], b[k]) if k in a else b[k]
+        elif isinstance(a, list) and isinstance(b, list):
+            for i in range(len(b)):
+                if i >= len(a):
+                    a.append(b[i])
+                else:
+                    a[i] = deep_merge(a[i], b[i])
+        return a
+
+    if isinstance(data, (dict, list)) and isinstance(backup_data, (dict, list)):
+        data = deep_merge(data, backup_data)
 
     return data
 
@@ -281,12 +304,12 @@ def initialize_game():
     globals()["hud"] = CoinHUD()
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 640, 400
-WALK_SPEED = 2.5
-RUN_SPEED = 4
+MIN_RUN_TIMER = 0
+MAX_RUN_TIMER = get_game_property("character_properties", "max_run_timer") * 10
+WALK_SPEED = get_game_property("character_properties", "walk_speed")
+RUN_SPEED = get_game_property("character_properties", "run_speed")
 JUMP_HOLD_TIME = 10
 MIN_SPEEDX = 0.25
-MIN_RUN_TIMER = 0
-MAX_RUN_TIMER = 75
 FPS = 60
 FADE_DURATION = 60
 SPROUT_SPEED = 1
@@ -497,6 +520,10 @@ class Background:
         self.layer_width = 0
         self.bg_width = 0
         self.bg_height = 0
+        try:
+            self.parallax_offset = get_game_property("parallax_offset")
+        except:
+            self.parallax_offset = 0
 
     def load_background(self, bgname):
         self.bg_layers_count = get_game_property("background_layers", bgname)
@@ -509,6 +536,10 @@ class Background:
     def update(self):
         for i in count_list_items(self.bg_layers):
             self.bg_positions[i] -= camera.x * (1 - (i / len(self.bg_layers) * 0.8))
+            try:
+                self.bg_positions[i] /= self.parallax_offset
+            except:
+                pass
             self.bg_positions[i] %= self.layer_width
 
     def draw(self):
@@ -631,7 +662,7 @@ class CoinAnimation:
             overlays.append(Score(self.x - camera.x, self.y - camera.y + 32, 200))
 
     def draw(self):
-        screen.blit(self.image.subsurface(self.sprites[self.dt]), (self.x - camera.x, self.y - camera.y))
+        screen.blit(self.image.subsurface(self.sprites[self.dt]), (self.x - camera.x - (((self.image_width // 32) - 8) / 2), self.y - camera.y))
 
 class CoinHUD:
     def __init__(self, coins=0):
@@ -977,7 +1008,7 @@ class Mushroom:
                 if self.rect.colliderect(tile.rect):
                     if self.speedy > 0 and tile.top_collide:
                         self.y = tile.rect.top - self.rect.height
-                        self.speedy = -math.pi if tile.bouncing else 0
+                        self.speedy = -pi if tile.bouncing else 0
                     elif self.speedy < 0 and tile.bottom_collide:
                         self.y = tile.rect.bottom
                         self.speedy = 0
@@ -1066,7 +1097,7 @@ class FireFlower:
                 if self.rect.colliderect(tile.rect):
                     if self.speedy > 0 and tile.top_collide:
                         self.y = tile.rect.top - self.rect.height
-                        self.speedy = -math.pi if tile.bouncing else 0
+                        self.speedy = -pi if tile.bouncing else 0
                     elif self.speedy < 0 and tile.bottom_collide:
                         self.y = tile.rect.bottom
                         self.speedy = 0
@@ -1169,9 +1200,9 @@ class Star:
 
 class Fireball:
     def __init__(self, player):
-        self.x = (player.rect.left + player.rect.right) / 2 - (player.quad_width - player.rect.width)
+        self.x = ((player.rect.left + player.rect.right) / 2) - (player.rect.width * 0.625)
         self.y = player.rect.top
-        self.bounce = math.pi
+        self.bounce = pi
         self.speedx = RUN_SPEED * (1.25 if player.facing_right else -1.25)
         self.speedy = self.bounce * (-1 if player.up else 1)
         self.rect = pygame.Rect(self.x, self.y, 8, 8)
@@ -1190,7 +1221,7 @@ class Fireball:
         self.dt += 1
         if self.destroyed:
             self.frame_timer += 1
-            self.frame_index = math.floor(min(self.frame_timer / 4, 3))
+            self.frame_index = floor(min(self.frame_timer / 4, 3))
             if self.frame_timer >= 15:
                 fireballs_table[str(self.player.player_number)].remove(self)
         else:
@@ -1272,7 +1303,7 @@ class Goomba:
         self.spr_width, self.spr_height = self.sprite.get_size()
         self.quad_width = self.spr_width // self.total_frames
         self.sprites = [[pygame.Rect(i * self.quad_width, j * self.spr_height // 4, self.quad_width, self.spr_height // 4) for i in range(self.total_frames)] for j in range(4)]
-        self.speedx = -math.pi / 4
+        self.speedx = -pi / 4
         self.speedy = 0
         self.rect = pygame.Rect(self.x, self.y, 16, 16)
         self.gravity = 0.25
@@ -1361,7 +1392,7 @@ class Goomba:
         self.shotted = True
         self.stomped = False
         self.speedx = 2 if self.speedx < 0 else -2
-        self.speedy = -math.pi
+        self.speedy = -pi
 
         if culprit:
             try:
@@ -1395,13 +1426,17 @@ class Koopa:
     def __init__(self, x, y, spriteset=1):
         self.x, self.y = x * 16, y * 16 + 8
         self.properties = get_game_property("enemies", "koopa")
+        try:
+            self.offset_y = self.properties["offsety"]
+        except:
+            self.offset_y = 0
         self.spriteset = spriteset
         self.sprite = load_sprite("koopa")
         self.total_frames = sum(self.properties["frames"].values())
         self.spr_width, self.spr_height = self.sprite.get_size()
         self.quad_width = self.spr_width // self.total_frames
         self.sprites = [[pygame.Rect(i * self.quad_width, j * self.spr_height // 4, self.quad_width, self.spr_height // 4) for i in range(self.total_frames)] for j in range(4)]
-        self.speedx = -math.pi / 4
+        self.speedx = -pi / 4
         self.speedy = 0
         self.shell_speed = 3.75
         self.rect = pygame.Rect(self.x, self.y, 16, 16)
@@ -1505,7 +1540,7 @@ class Koopa:
         self.shotted = True
         self.stomped = False
         self.speedx = 2 if self.speedx < 0 else -2
-        self.speedy = -math.pi
+        self.speedy = -pi
 
         if culprit:
             try:
@@ -1533,7 +1568,7 @@ class Koopa:
     def draw(self):
         image = pygame.transform.rotate(self.sprite.subsurface(self.sprites[self.spriteset][self.frame_index + (self.properties["frames"]["normal"] if self.stomped or self.shotted else 0)]), self.angle)
         image = pygame.transform.flip(image, xor((self.speedx > 0 and not self.shotted), nitpicks["moonwalking_enemies"]), False)
-        screen.blit(image, (self.x - camera.x - (self.quad_width // 4), self.y - camera.y - (self.spr_height // 16) + 1))
+        screen.blit(image, (self.x - camera.x - (self.quad_width // 4), self.y - camera.y - (self.spr_height // 16) + 1 - self.offset_y))
 
 class Castle:
     def __init__(self, x, y, spriteset=1):
@@ -1582,6 +1617,7 @@ class Player:
         self.skid_timer = 0
         self.idle_timer = 0
         self.jumping_timer = 0
+        self.falling_timer = 0
         self.jump_timer = 0
         self.anim_state = 0
         self.left = False
@@ -1769,9 +1805,9 @@ class Player:
             if self.piping:
                 if self.pipe_timer <= self.pipe_duration * 60:
                     self.pipe_timer += 1
+                    self.rect.y += self.speedy
                     if self.pipe_timer <= self.pipe_duration * 30:
                         self.rect.x += self.speedx
-                        self.rect.y += self.speedy
                 if abs(self.speedx) < MIN_SPEEDX:
                     self.anim_state = self.frame_data["dead"] + ((int(self.pipe_anim_timer * self.frame_speeds["pipe"]) % self.frame_group["pipe"]) if self.frame_loops["pipe"] else min(int(self.pipe_timer * self.frame_speeds["pipe"]), self.frame_group["pipe"] + 1))
                 else:
@@ -2132,7 +2168,8 @@ class Player:
         self.crouch_fall_timer = (self.crouch_fall_timer + 1) if self.down and self.falling_condition else 0
         self.pipe_anim_timer = (self.pipe_anim_timer + 1) if self.piping else 0
         self.skid_timer = (self.skid_timer + 1) if self.skidding else 0
-        self.jumping_timer = (self.jumping_timer + 1) if self.speedy < 0 else 0
+        self.jumping_timer = (self.jumping_timer + 1) if self.speedy < 0 and self.fall_timer >= self.fall_duration else 0
+        self.falling_timer = (self.falling_timer + 1) if self.falling_condition else 0
         self.idle_timer = (self.idle_timer + 1) if abs(self.speedx) < MIN_SPEEDX else 0
 
         if self.dead:
@@ -2151,7 +2188,7 @@ class Player:
             self.anim_state = self.frame_data["run" if self.pspeed else "skid"] + ((int(self.jumping_timer * self.frame_speeds["runjump" if self.pspeed else "jump"]) % self.frame_group["runjump" if self.pspeed else "jump"]) if self.frame_loops["runjump" if self.pspeed else "jump"] else min(int(self.jumping_timer * self.frame_speeds["runjump" if self.pspeed else "jump"]), self.frame_group["runjump" if self.pspeed else "jump"] - 1))
             self.frame_timer = 0
         elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.down):
-            self.anim_state = self.frame_data["runjump" if self.pspeed else "jump"] + ((int(self.fall_timer * self.frame_speeds["runfall" if self.pspeed else "fall"]) % self.frame_group["runfall" if self.pspeed else "fall"]) if self.frame_loops["runfall" if self.pspeed else "fall"] else min(int(self.fall_timer * self.frame_speeds["runfall" if self.pspeed else "fall"]), self.frame_group["runfall" if self.pspeed else "fall"] - 1))
+            self.anim_state = self.frame_data["runjump" if self.pspeed else "jump"] + ((int(self.falling_timer * self.frame_speeds["runfall" if self.pspeed else "fall"]) % self.frame_group["runfall" if self.pspeed else "fall"]) if self.frame_loops["runfall" if self.pspeed else "fall"] else min(int(self.falling_timer * self.frame_speeds["runfall" if self.pspeed else "fall"]), self.frame_group["runfall" if self.pspeed else "fall"] - 1))
             self.frame_timer = 0
         elif abs(self.speedx) < MIN_SPEEDX and self.on_ground:
             self.anim_state = (int(self.idle_timer * self.frame_speeds["idle"]) % self.frame_group["idle"]) if self.frame_loops["idle"] else min(int(self.idle_timer * self.frame_speeds["idle"]), self.frame_group["idle"] - 1)
@@ -2244,7 +2281,7 @@ characters_data = get_game_property("character_properties", "character_data")
 characters_name = [get_game_property("character_properties", "character_data", i, "name") for i in count_list_items(characters_data)]
 characters_color = [get_game_property("character_properties", "character_data", i, "color") for i in count_list_items(characters_data)]
 
-for i in range(math.floor(len(characters_data) / 4)):
+for i in range(floor(len(characters_data) / 4)):
     globals()["controls" if i == 0 else f"controls{i + 1}"] = {
         "up": pygame.K_UP,
         "down": pygame.K_DOWN,
@@ -2378,7 +2415,7 @@ selected_menu_index = 0
 pause_menu_index = 0
 old_players_ready = 1
 old_players_controls = 1
-old_selected_texture = 1
+old_selected_texture = 0 if len(get_folders("textures")) == 0 else 1
 old_selected_menu_index = 0
 old_pause_menu_index = 0
 old_mus_vol = mus_vol
@@ -2419,7 +2456,7 @@ while running:
     snd_vol = round(range_number(snd_vol, 0, 1) * (1 / numerical_change)) / (1 / numerical_change)
     players_ready = range_number(players_ready, 1, len(characters_data))
     players_controls = range_number(players_controls, 1, len(characters_data))
-    selected_texture = range_number(selected_texture, 1, len(get_folders("textures")))
+    selected_texture = range_number(selected_texture, 0 if len(get_folders("textures")) == 0 else 1, len(get_folders("textures")))
     if nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_players_ready == players_ready, old_players_controls == players_controls, old_selected_texture == selected_texture):
         sound_player.play_sound(beep_sound)
     old_mus_vol = mus_vol
@@ -2439,7 +2476,8 @@ while running:
             }, settings, indent=4)
 
     if not old_asset_directory == asset_directory:
-        restart()
+        open_program(f'"{sys.executable}" "{sys.argv[0]}"', shell=True)
+        sys.exit("In order to properly load textures, the program must be restarted. Loading the textures without restarting could bug out the game resources.")
 
     if fade_in:
         fade_out = False
@@ -2523,11 +2561,10 @@ while running:
         ]
 
         textures_list = get_folders("textures")
-        textures = [
-            ["base texture", 0.75],
-            [f"{textures_list[selected_texture - 1]}", 0.875],
-            ["back", 1]
-        ]
+        textures = [["base texture", 0.75]]
+        if len(textures_list) != 0:
+            textures.append([f"{textures_list[selected_texture - 1]}", 0.875])
+        textures.append(["back", 0.875 if len(textures_list) == 0 else 1])
         title_screen.append(textures)
 
         for i in count_list_items(characters_data):
@@ -2681,7 +2718,7 @@ while running:
             dt += 1
 
         if nor(pause, everyone_dead, any(player.size_change for player in players), any(player.piping for player in players), any(player.clear for player in players), nitpicks["infinite_time"]):
-            course_time = math.ceil(time - dt/60)
+            course_time = ceil(time - dt/60)
 
         background_manager.load_background(background)
         background_manager.update()
@@ -3037,7 +3074,7 @@ while running:
                                 old_asset_directory = asset_directory
                                 asset_directory = "assets"
                             elif selected_menu_index == 1:
-                                if len(textures) == 0:
+                                if len(textures_list) == 0:
                                     selected_menu_index = old_selected_menu_index = 0
                                     menu_area = 2
                                     sound_player.play_sound(coin_sound)
@@ -3061,7 +3098,7 @@ while running:
                                 sound_player.stop_sound(powerup_sound)
 
     bgm_player.update()
-    pygame.display.flip()
+    pygame.display.update()
     clock.tick(FPS)
 
 pygame.quit()
