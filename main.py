@@ -16,6 +16,12 @@ infinity = float("inf")
 pi = 3.141592653589793
 main_directory = dirname(sys.executable if getattr(sys, 'frozen', False) else abspath(__file__))
 
+def mean(*numbers):
+    try:
+        return sum(numbers) / len(numbers)
+    except:
+        return 0
+
 def floor(x):
     i = int(x)
     return i if x >= 0 or x == i else i - 1
@@ -51,8 +57,23 @@ except:
 
 old_asset_directory = asset_directory
 
+course_directory = "classic"
+try:
+    course_directory = load_json("settings", "course_directory")
+
+    if not isdir(load_local_file(course_directory)):
+        course_directory = "classic"
+
+    if not isinstance(course_directory, str):
+        raise CustomError("SaveDataError", f"Invalid type for 'course_directory' in settings.json: expected str, got {type(course_directory).__name__}.")
+except:
+    pass
+
 def get_folders(directory):
     return [folder for folder in listdir(load_local_file(directory))]
+
+if not exists(load_local_file("courses")):
+    makedirs(load_local_file("courses"))
 
 if not exists(load_local_file("textures")):
     makedirs(load_local_file("textures"))
@@ -257,7 +278,7 @@ def scale_image(image, scale_factor=1):
         raise ValueError(f"Invalid type for 'scale_factor': expected int, float, list, or tuple, got {type(scale_factor).__name__}.")
 
     new_surface = pygame.Surface((new_width * 2, new_height * 2), pygame.SRCALPHA)
-    new_surface.blit(pygame.transform.scale(image, (new_width, new_height)), ((((new_width * 2) - new_width) / 2) - (image.get_width() / 2), (((new_height * 2) - new_height) / 2) - (image.get_height() / 2)))
+    new_surface.blit(pygame.transform.scale(image, (new_width, new_height)), (mean((new_width * 2) - new_width, -image.get_width()), mean((new_height * 2) - new_height, -image.get_height())))
     return new_surface
 
 def split_image(image, cols=1, rows=1):
@@ -559,8 +580,8 @@ class Camera:
         self.y = 0
 
     def update(self, players, max_x=None, max_y=None):
-        self.x = range_number(sum(player.rect.x + player.rect.width for player in players) / len(players) - SCREEN_WIDTH // 2, 0, (max_x if max_x is not None else infinity))
-        self.y = range_number(sum(player.rect.y + player.rect.height for player in players) / len(players) - SCREEN_HEIGHT // 2, 0, (max_y if max_y is not None else infinity))
+        self.x = range_number(mean(*[player.rect.x + player.rect.width for player in players]) - SCREEN_WIDTH // 2, 0, max_x if max_x is not None else infinity)
+        self.y = range_number(mean(*[player.rect.y + player.rect.height for player in players]) - SCREEN_HEIGHT // 2, 0, max_y if max_y is not None else infinity)
 
 class Logo:
     def __init__(self):
@@ -741,7 +762,10 @@ class Tile:
             self.image = load_sprite(image)
         except:
             self.image = self.original_image
-        self.img_width, self.img_height = self.image.get_size()
+        try:
+            self.img_width, self.img_height = self.image.get_size()
+        except:
+            self.img_width, self.img_height = 16, 16
         self.tile_size = 16
         self.rect = pygame.Rect(x * 16, y * 16 + 8, self.tile_size, self.tile_size)
         self.cols = 1
@@ -790,7 +814,7 @@ class Tile:
                     self.frame_index = 0
                     self.item = None
                 else:
-                    if self.original_image == "hiddenblock":
+                    if self.original_image == None:
                         self.left_collide = True
                         self.right_collide = True
                         self.top_collide = True
@@ -905,7 +929,7 @@ class QuestionBlock(AnimatedTile):
 
 class HiddenBlock(AnimatedTile):
     def __init__(self, x, y, item=CoinAnimation, item_spawn_anim=True, spriteset=1, item_sound=sprout_sound):
-        super().__init__(x, y, "hiddenblock", spriteset, bonk_bounce=True, item=item, item_spawn_anim=False if item == CoinAnimation else item_spawn_anim, item_sound=item_sound, left_collide=False, right_collide=False, top_collide=False)
+        super().__init__(x, y, None, spriteset, bonk_bounce=True, item=item, item_spawn_anim=False if item == CoinAnimation else item_spawn_anim, item_sound=item_sound, left_collide=False, right_collide=False, top_collide=False)
 
     def update(self):
         super().update()
@@ -1200,7 +1224,7 @@ class Star:
 
 class Fireball:
     def __init__(self, player):
-        self.x = ((player.rect.left + player.rect.right) / 2) - (player.rect.width * 0.625)
+        self.x = player.rect.left - 5
         self.y = player.rect.top
         self.bounce = pi
         self.speedx = RUN_SPEED * (1.25 if player.facing_right else -1.25)
@@ -1290,7 +1314,7 @@ class Fireball:
         )
 
     def draw(self):
-        if self.dt > 0:
+        if self.dt > 1:
             screen.blit(pygame.transform.rotate(self.sprite.subsurface(self.sprites[self.frame_index]), self.angle), (self.x - camera.x, self.y - camera.y - 3))
 
 class Goomba:
@@ -1568,7 +1592,12 @@ class Koopa:
     def draw(self):
         image = pygame.transform.rotate(self.sprite.subsurface(self.sprites[self.spriteset][self.frame_index + (self.properties["frames"]["normal"] if self.stomped or self.shotted else 0)]), self.angle)
         image = pygame.transform.flip(image, xor((self.speedx > 0 and not self.shotted), nitpicks["moonwalking_enemies"]), False)
-        screen.blit(image, (self.x - camera.x - (self.quad_width // 4), self.y - camera.y - (self.spr_height // 16) + 1 - self.offset_y))
+        
+        image_rect = image.get_rect()
+        image_rect.centerx = self.x - camera.x + (self.quad_width // 4)
+        image_rect.centery = self.y - camera.y + (self.spr_height // 16) + 1 - self.offset_y
+
+        screen.blit(image, image_rect.topleft)
 
 class Castle:
     def __init__(self, x, y, spriteset=1):
@@ -1981,7 +2010,7 @@ class Player:
                             self.on_ground = True
                             self.falling = False
                             self.fall_timer = 0
-                        elif self.speedy < 0 and self.rect.top <= tile.rect.bottom and tile.bottom_collide:
+                        elif self.speedy < 0 and tile.rect.bottom - 8 <= self.rect.top <= tile.rect.bottom and tile.bottom_collide:
                             if abs(self.rect.left - tile.rect.right) <= 4 and not any(t.rect.colliderect(pygame.Rect(self.rect.left, self.rect.bottom - 1, 1, 1)) for t in tiles if not t.broken):
                                 if tile.right_collide:
                                     self.rect.x = tile.rect.right
@@ -2410,11 +2439,13 @@ if exists(load_local_file("settings.json")) and not getsize(load_local_file("set
 
 players_ready = 1
 players_controls = 1
+selected_course_pack = 1
 selected_texture = 1
 selected_menu_index = 0
 pause_menu_index = 0
 old_players_ready = 1
 old_players_controls = 1
+old_selected_course_pack = 0 if len(get_folders("courses")) == 0 else 1
 old_selected_texture = 0 if len(get_folders("textures")) == 0 else 1
 old_selected_menu_index = 0
 old_pause_menu_index = 0
@@ -2456,13 +2487,15 @@ while running:
     snd_vol = round(range_number(snd_vol, 0, 1) * (1 / numerical_change)) / (1 / numerical_change)
     players_ready = range_number(players_ready, 1, len(characters_data))
     players_controls = range_number(players_controls, 1, len(characters_data))
+    selected_course_pack = range_number(selected_course_pack, 0 if len(get_folders("courses")) == 0 else 1, len(get_folders("courses")))
     selected_texture = range_number(selected_texture, 0 if len(get_folders("textures")) == 0 else 1, len(get_folders("textures")))
-    if nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_players_ready == players_ready, old_players_controls == players_controls, old_selected_texture == selected_texture):
+    if nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_players_ready == players_ready, old_players_controls == players_controls, old_selected_texture == selected_texture, old_selected_course_pack == selected_course_pack):
         sound_player.play_sound(beep_sound)
     old_mus_vol = mus_vol
     old_snd_vol = snd_vol
     old_players_ready = players_ready
     old_players_controls = players_controls
+    old_selected_course_pack = selected_course_pack
     old_selected_texture = selected_texture
 
     with open(load_local_file("settings.json"), "w") as settings:
@@ -2472,7 +2505,8 @@ while running:
                 "snd_vol": snd_vol,
                 **{f"controls{'' if i == 0 else i+1}": controls_table[i] for i in count_list_items(characters_data)},
                 "fullscreen": fullscreen,
-                "asset_directory": asset_directory
+                "asset_directory": asset_directory,
+                "course_directory": course_directory
             }, settings, indent=4)
 
     if not old_asset_directory == asset_directory:
@@ -2496,10 +2530,10 @@ while running:
             elif game_ready:
                 initialize_game()
                 course += 1
-                while not exists(load_local_file(f"courses/{world}-{course}.json")):
+                while not exists(load_local_file(f"courses/{course_directory}/{world}-{course}.json")):
                     course = 1
                     world += 1
-                create_course(load_json(f"courses/{world}-{course}"))
+                create_course(load_json(f"courses/{course_directory}/{world}-{course}"))
                 if time > 100:
                     bgm_player.play_music(main_music)
                 for i in range(player_count):
@@ -2508,7 +2542,7 @@ while running:
                     players_hud.append(PlayerHUD(players[i]))
             elif reset_ready:
                 initialize_game()
-                create_course(load_json(f"courses/{world}-{course}"))
+                create_course(load_json(f"courses/{course_directory}/{world}-{course}"))
                 if time > 100:
                     bgm_player.play_music(main_music)
                 for i in range(player_count):
@@ -2527,7 +2561,7 @@ while running:
                     pipe_wait_timer = 0
                 else:
                     initialize_game()
-                    create_course(load_json(f"courses/{world}-{course}"))
+                    create_course(load_json(f"courses/{course_directory}/{world}-{course}"))
                     if time > 100:
                         bgm_player.play_music(main_music)
                     for i in range(player_count):
@@ -2555,17 +2589,25 @@ while running:
                 [f"controls ({characters_name[players_controls - 1]})", 0.75, tuple(characters_color[players_controls - 1])],
                 [f"music volume: {int(mus_vol * 100)}%", 0.875],
                 [f"sound volume: {int(snd_vol * 100)}%", 1],
-                ["load texture", 1.125],
-                ["back", 1.25]
+                ["set course pack", 1.125],
+                ["load texture", 1.25],
+                ["back", 1.375]
             ],
         ]
 
         textures_list = get_folders("textures")
         textures = [["base texture", 0.75]]
-        if len(textures_list) != 0:
+        if not len(textures_list) == 0:
             textures.append([f"{textures_list[selected_texture - 1]}", 0.875])
         textures.append(["back", 0.875 if len(textures_list) == 0 else 1])
         title_screen.append(textures)
+
+        courses_list = get_folders("courses")
+        courses = []
+        if not len(courses_list) == 0:
+            courses.append([f"{courses_list[selected_course_pack - 1]}", 0.75])
+        courses.append(["back", 0.75 if len(courses_list) == 0 else 0.875])
+        title_screen.append(courses)
 
         for i in count_list_items(characters_data):
             title_screen.append(
@@ -2670,7 +2712,37 @@ while running:
                         scale=0.5
                     )
         
-        elif key_exists(title_screen[3:], menu_options):
+        elif menu_options == title_screen[3]:
+            for i in count_list_items(courses):
+                course_data = courses[i]
+                
+                text.create_text(
+                    text=course_data[0].upper(),
+                    position=(centerx, centery * course_data[1]),
+                    alignment="center",
+                    stickxtocamera=True,
+                    color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
+                )
+
+                if selected_menu_index == 0 and len(courses_list) >= 1:
+                    text.create_text(
+                        text="PRESS LEFT OR RIGHT\nTO SWITCH BETWEEN COURSE PACKS",
+                        position=(centerx, centery * 1.125),
+                        alignment="center",
+                        stickxtocamera=True,
+                        scale=0.5
+                    )
+
+                elif len(courses_list) == 0:
+                    text.create_text(
+                        text="NO COURSE PACKS FOUND, REDOWNLOADED THE SOURCE COURSES FOLDER",
+                        position=(centerx, centery * 1.25),
+                        alignment="center",
+                        stickxtocamera=True,
+                        scale=0.5
+                    )
+        
+        elif key_exists(title_screen[4:], menu_options):
             for i in count_list_items(menu_options):
                 options = menu_options[i]
 
@@ -3036,10 +3108,12 @@ while running:
                                 mus_vol += change
                             elif selected_menu_index == 2:
                                 snd_vol += change
-                        elif menu_options == title_screen[2] and selected_menu_index == 1:
+                        elif menu_options == title_screen[2] and selected_menu_index == 1 and len(textures) >= 1:
                             selected_texture += 1 if key == controls["right"] else -1
+                        elif menu_options == title_screen[3] and selected_menu_index == 1 and len(courses) >= 1:
+                            selected_course_pack += 1 if key == controls["right"] else -1
                     elif key == controls["run"] and not binding_key:
-                        if menu_options in title_screen[1:3] or key_exists(title_screen[3:], menu_options):
+                        if menu_options in title_screen[1:4] or key_exists(title_screen[4:], menu_options):
                             selected_menu_index = old_selected_menu_index = 0
                             menu_area = 1 if menu_options == title_screen[1] else 2
                             players_ready = old_players_ready = 1
@@ -3063,11 +3137,19 @@ while running:
                                 player_count = players_ready
                                 player_lives, player_sizes = [lives] * player_count, [0] * player_count
                         elif menu_options == title_screen[1]:
-                            if selected_menu_index in (0, 3, 4):
-                                menu_area = players_controls + 3 if selected_menu_index == 0 else 1 if selected_menu_index == 4 else 3
+                            if selected_menu_index in (0, 3, 4, 5):
+                                if selected_menu_index == 0:
+                                    menu_area = players_controls + 4
+                                elif selected_menu_index == 3:
+                                    menu_area = 4
+                                elif selected_menu_index == 4:
+                                    menu_area = 3
+                                elif selected_menu_index == 5:
+                                    menu_area = 1
                                 selected_menu_index = old_selected_menu_index = 0
                                 players_controls = old_players_controls = 1
                                 selected_texture = old_selected_texture = 1
+                                selected_course_pack = old_selected_course_pack = 1
                                 sound_player.play_sound(coin_sound)
                         elif menu_options == title_screen[2]:
                             if selected_menu_index == 0:
@@ -3085,7 +3167,19 @@ while running:
                                 selected_menu_index = old_selected_menu_index = 0
                                 menu_area = 2
                                 sound_player.play_sound(coin_sound)
-                        elif key_exists(title_screen[3:], menu_options) and not binding_key:
+                        elif menu_options == title_screen[3]:
+                            if selected_menu_index == 0:
+                                if len(courses_list) == 0:
+                                    selected_menu_index = old_selected_menu_index = 0
+                                else:
+                                    course_directory = f"{courses_list[selected_course_pack - 1]}"
+                                menu_area = 2
+                                sound_player.play_sound(coin_sound)
+                            else:
+                                selected_menu_index = old_selected_menu_index = 0
+                                menu_area = 2
+                                sound_player.play_sound(coin_sound)
+                        elif key_exists(title_screen[4:], menu_options) and not binding_key:
                             if selected_menu_index == 7:
                                 selected_menu_index = old_selected_menu_index = 0
                                 menu_area = 2
@@ -3110,6 +3204,7 @@ with open(load_local_file("settings.json"), "w") as settings:
             "snd_vol": snd_vol,
             **{f"controls{'' if i == 0 else i+1}": controls_table[i] for i in count_list_items(controls_table)},
             "fullscreen": fullscreen,
-            "asset_directory": asset_directory
+            "asset_directory": asset_directory,
+            "course_directory": course_directory
         }, settings, indent=4
     )
