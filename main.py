@@ -1614,17 +1614,18 @@ class Player:
     def __init__(self, x, y, lives=3, size=0, controls_enabled=True, walk_cutscene=False, player_number=1):
         self.properties = get_game_property("character_properties")
         self.character_data = self.properties["character_data"][player_number]
+        self.midair_accel = self.properties["accelerate_midair"]
+        self.death_anim = self.properties["pre_death_anim_jump"]
+        self.sync_crouch = self.properties["sync_crouch_fall_anim"]
+        self.midair_turn = self.properties["midair_turn"]
+        self.quad_width = self.properties["quad_width"]
+        self.quad_height = self.properties["quad_height"]
         self.frame_group = self.character_data["frames"]
         self.frame_loops = self.character_data["frame_loops"]
         self.frame_speeds = self.character_data["frame_speeds"]
         self.acceleration = self.character_data["acceleration"]
         self.max_jump = self.character_data["max_jump"]
         self.color = self.character_data["color"]
-        self.death_anim = self.properties["pre_death_anim_jump"]
-        self.sync_crouch = self.properties["sync_crouch_fall_anim"]
-        self.midair_turn = self.properties["midair_turn"]
-        self.quad_width = self.properties["quad_width"]
-        self.quad_height = self.properties["quad_height"]
         self.frame_data = {}
         self.prev_key = 0
         for key in ["idle", "crouch", "crouchfall", "walk", "skid", "jump", "fall", "run", "runjump", "runfall", "dead", "pipe", "climb", "swim", "swimpush", "fire"]:
@@ -1851,6 +1852,8 @@ class Player:
                     self.speedx -= self.acceleration if self.speedx > 0 else -self.acceleration
                     if abs(self.speedx) < WALK_SPEED:
                         self.speedx = WALK_SPEED if self.speedx > 0 else -WALK_SPEED
+                if self.midair_accel:
+                    self.speed = (RUN_SPEED * (1.25 if self.pspeed else 1) if self.run else WALK_SPEED) * (1.25 if self.star else 1)
 
             self.run_lock = self.run and not self.prev_run
 
@@ -2797,7 +2800,7 @@ while running:
         background_manager.draw()
 
         try:
-            if not any(player.piping for player in players):
+            if nor(any(player.piping for player in players), everyone_dead):
                 camera.update([player for player in players if not player.dead], x_range, y_range - 400)
         except ZeroDivisionError:
             pass
@@ -3191,9 +3194,9 @@ while running:
                                 sound_player.play_sound(sprout_sound)
                                 sound_player.stop_sound(powerup_sound)
 
+    clock.tick(FPS)
     bgm_player.update()
     pygame.display.update()
-    clock.tick(FPS)
 
 pygame.quit()
 
