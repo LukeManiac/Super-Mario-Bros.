@@ -1,25 +1,40 @@
 # Super Mario Bros. for Python
 
-## Overview
+## 🌟 Overview
 
-Welcome to **Super Mario Bros. for Python**, a fully-fledged recreation of the legendary **Super Mario Bros.** game, built entirely in Python. This project, passionately developed by **LukeManiac** (yes, that's me!), is a personal take on bringing the magic of one of the most beloved platformers of all time into the world of Python programming. The game is powered by the **`pygame` library**, which provides robust tools for handling rendering, player input, and audio management, ensuring smooth gameplay and a faithful retro experience. From **jumping over Goombas** to **smashing bricks for coins**, every fundamental mechanic of the classic game has been carefully implemented to provide a nostalgic yet customizable experience. Whether you're here to **relive the classic Mario experience**, **tinker with Python game development**, or even **mod the game to add your own creative touch**, this project is designed to be fun, flexible, and endlessly expandable!
+Welcome to **Super Mario Bros. for Python** — a fully-fledged recreation of the legendary **Super Mario Bros.** game, built entirely in Python!
+
+This project, passionately developed by **LukeManiac** (yes, that's me!), is my personal take on bringing the timeless magic of one of the most beloved platformers into the world of programming. Powered by the **`pygame` library**, the game offers smooth gameplay, nostalgic visuals, and a faithful retro experience. 
+
+From **jumping over Goombas** to **smashing bricks for coins**, every core mechanic has been carefully implemented to provide a customizable and endlessly expandable experience. Whether you're here to **relive the classic Mario adventure**, **learn Python game development**, or **mod your own worlds**, you're in for a fun ride!
+
+---
+
+## 🚀 Features
+
+- 🎮 **Full Menu System** – Navigate through interactive menus to start games, tweak settings, or configure controls.
+- 🎛️ **Customizable Controls** – Remap the controls however you like—keyboard, gamepad, or both!
+- 🔊 **Sound & Music Options** – Adjust background music and sound effects to perfect your retro atmosphere.
+- 🖥️ **Full-Screen Mode** – Instantly switch between windowed and full-screen modes (Alt + Enter).
+- 👥 **Multiplayer Support** – Play with up to *infinite players* (yes, really—control schemes cycle after four players).
+- 🖌️ **Custom Textures & Animations** – Replace or modify characters, enemies, and backgrounds with your own pixel art.
+- 🗺️ **Custom Course Packs** – Design and load brand-new level packs for endless adventures!
+- 🔁 **Advanced Event System** – Smooth keyboard, gamepad, and menu handling, built from scratch.
+- ⚡ **Smooth Fade Effects** – Enjoy polished level transitions and scene changes with stylish fades.
+- 💾 **Automatic Settings Saving** – Your preferences are saved—no need to reconfigure every time.
+- 🛠️ **Modding Support** – Build your own power-ups, adjust physics, create levels, and much more!
 
 ---
 
-## Features
+## ⚡ Modded Experience Note
 
-- **🎮 Full Menu System** – The game includes a fully interactive menu where players can configure settings, start new games, and even tweak game preferences.
-- **🎛️ Customizable Controls** – Don’t like the default key bindings? No problem! Players can freely configure their own control schemes to match their preferences.
-- **🔊 Sound & Music Options** – Toggle background music, adjust sound effect volume, and create the perfect retro atmosphere to suit your experience.
-- **🖥️ Full-Screen Mode** – Whether you want to play in a window or immerse yourself in full-screen mode, you can seamlessly switch with `Alt + Enter`.
-- **👥 Multiplayer Support** – Enjoy the game **with up to infinite players** (yes, infinite—though the control scheme loops after four players).
-- **🖌️ Custom Textures & Animations** – Modify or replace character sprites, enemy animations, and in-game objects using your own pixel art.
-- **🔁 Advanced Event System** – Built-in event management system that handles keyboard input, gamepad support, and menu navigation smoothly.
-- **⚡ Smooth Fade Effects** – Experience enhanced **transition effects** that add polish to level changes and scene shifts.
-- **💾 Automatic Settings Saving** – No need to configure your settings every time you launch the game—your preferences are saved automatically!
-- **🛠️ Modding Support** – Want to **add new power-ups, tweak physics, or create new levels**? This game is built with expandability in mind!
+If you plan to **mod the game heavily** (adding new sprites, levels, mechanics, etc.), it's **highly recommended** to package your project into a standalone `.exe` file after making major changes.  
 
----
+This ensures that custom content loads correctly and prevents dependency issues that can occur when sharing or running the modded game.
+
+### 🛠 Recommended Tool
+
+- [**auto-py-to-exe**](https://github.com/brentvollebregt/auto-py-to-exe) — A simple, graphical tool for converting your Python scripts into executable files.
 
 ## Installation
 
