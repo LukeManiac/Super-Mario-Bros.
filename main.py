@@ -2975,7 +2975,7 @@ while running:
 
             text.create_text(
                 text=f"x{format_number(hud.coins, 2)}",
-                position=(24, 16),
+                position=(20 + hud.image.get_width(), 16),
                 stickxtocamera=True,
                 scale=0.5
             )
