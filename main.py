@@ -15,6 +15,19 @@ infinity = float("inf")
 pi = 3.141592653589793
 main_directory = dirname(sys.executable if getattr(sys, 'frozen', False) else abspath(__file__))
 
+def set_image_alpha(image, alpha=1):
+    try:
+        alpha = float(alpha)
+        if not (0 <= alpha <= 1):
+            raise ValueError
+    except:
+        alpha = 1
+
+    image = image.convert_alpha()
+    image.set_alpha(alpha * 255)
+
+    return image
+
 def mean(*numbers):
     try:
         return sum(numbers) / len(numbers)
@@ -199,8 +212,8 @@ def create_course(data):
     globals()["tiles"] = tiles
 
     if key_exists(data, "spawnpositions") and isinstance(data["spawnpositions"], list):
-        globals()["spawnposx"] = data["spawnpositions"][0] * 16
-        globals()["spawnposy"] = (data["spawnpositions"][1] - 4) * 16
+        globals()["spawnposx"] = data["spawnpositions"][0]
+        globals()["spawnposy"] = data["spawnpositions"][1]
 
     for category, items in data.items():
         if key_exists(("tiles", "castle", "background", "tileset"), category):
@@ -320,6 +333,7 @@ def initialize_game():
     globals()["debris"] = []
     globals()["particles"] = []
     globals()["overlays"] = []
+    globals()["trails"] = []
     globals()["fireballs_table"] = {str(i): [] for i in range(player_count)}
     globals()["hud"] = CoinHUD()
 
@@ -372,6 +386,23 @@ shrink_sound = load_sound("shrink")
 skid_sound = load_sound("skid")
 sprout_sound = load_sound("sprout")
 stomp_sound = load_sound("stomp")
+
+class Trail:
+    def __init__(self, x, y, image):
+        self.x = x
+        self.y = y
+        self.image = image
+        self.camera_x = camera.x
+        self.camera_y = camera.y
+        self.alpha = 1
+    
+    def update(self):
+        self.alpha -= 0.03125
+        if self.alpha <= 0:
+            trails.remove(self)
+
+    def draw(self):
+        screen.blit(set_image_alpha(self.image, self.alpha), (self.x + (self.camera_x - camera.x), self.y - (self.camera_y - camera.y)))
 
 class PipeMarker:
     def __init__(self, x, y, pipe_dir, zone):
@@ -1637,7 +1668,7 @@ class Castle:
         screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y))
 
 class Player:
-    def __init__(self, x, y, lives=3, size=0, controls_enabled=True, walk_cutscene=False, player_number=1):
+    def __init__(self, x=0, y=0, lives=3, size=0, controls_enabled=True, walk_cutscene=False, player_number=1):
         self.properties = get_game_property("character_properties")
         self.death_anim = self.properties["pre_death_anim_jump"]
         self.sync_crouch = self.properties["sync_crouch_fall_anim"]
@@ -1733,6 +1764,8 @@ class Player:
         self.kicked_timer = 0
         self.kicked_duration = 0.5
         self.prev_bottom = None
+        self.star_trail_timer = 0
+        self.star_trail_duration = 0.0625
         self.just_spawned = True
         self.update_hitbox()
 
@@ -1787,13 +1820,13 @@ class Player:
                     self.jump_timer = 0 if furthest_player.fall_timer < furthest_player.fall_duration else 1
                     self.shrunk = True
         else:
-            self.left = (keys[self.controls["left"]]) if self.controls_enabled and self.can_control and not self.piping else False
-            self.right = (keys[self.controls["right"]]) if self.controls_enabled and self.can_control and not self.piping else False
-            self.up = (keys[self.controls["up"]]) if self.controls_enabled and self.can_control and not self.piping else False
-            self.down = (keys[self.controls["down"]] if self.fall_timer < self.fall_duration else self.down) if self.controls_enabled and self.can_control and not self.piping else False
-            self.down_key = (keys[self.controls["down"]]) if self.controls_enabled and self.can_control and not self.piping else False
-            self.run = (keys[self.controls["run"]]) if self.controls_enabled and self.can_control and not self.piping else False
-            self.jump = (keys[self.controls["jump"]]) if self.controls_enabled and self.can_control and not self.piping else False
+            self.left = (keys[self.controls["left"]]) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
+            self.right = (keys[self.controls["right"]]) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
+            self.up = (keys[self.controls["up"]]) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
+            self.down = (keys[self.controls["down"]] if self.fall_timer < self.fall_duration else self.down) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
+            self.down_key = (keys[self.controls["down"]]) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
+            self.run = (keys[self.controls["run"]]) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
+            self.jump = (keys[self.controls["jump"]]) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
 
             if self.kicked_shell:
                 self.kicked_timer += 1
@@ -1955,16 +1988,15 @@ class Player:
                 elif not self.run_timer == MAX_RUN_TIMER:
                     self.run_timer = range_number(self.run_timer - (3 if self.star else 0.5), MIN_RUN_TIMER, MAX_RUN_TIMER)
 
-            if self.just_spawned:
-                if self.rect.left <= camera.x:
-                    self.rect.left = camera.x
-                    if self.rect.x <= camera.x and ((self.speedx < 0 and not self.facing_right) or (self.speedx < 0 and self.facing_right)):
-                        self.speedx = 0
+            if self.rect.left <= camera.x:
+                self.rect.left = camera.x
+                if self.rect.x <= camera.x and ((self.speedx < 0 and not self.facing_right) or (self.speedx < 0 and self.facing_right)):
+                    self.speedx = 0
 
-                if self.rect.right >= camera.x + SCREEN_WIDTH:
-                    self.rect.right = camera.x + SCREEN_WIDTH
-                    if self.rect.x >= camera.x + SCREEN_WIDTH - self.rect.width and ((self.speedx > 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)):
-                        self.speedx = 0
+            if self.rect.right >= camera.x + SCREEN_WIDTH:
+                self.rect.right = camera.x + SCREEN_WIDTH
+                if self.rect.x >= camera.x + SCREEN_WIDTH - self.rect.width and ((self.speedx > 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)):
+                    self.speedx = 0
 
             if self.rect.top < camera.y:
                 self.rect.top = camera.y
@@ -1990,7 +2022,6 @@ class Player:
             self.rect.y += self.speedy
             self.on_ground = False
 
-            self.rect.x = range_number(self.rect.x, 0, camera.x + SCREEN_WIDTH)
             self.speedy = min(self.speedy, 5)
 
             if self.size_change:
@@ -2214,6 +2245,8 @@ class Player:
 
             self.prev_run = self.run
 
+        self.star_trail_timer = (self.star_trail_timer + 1) if self.star else 0
+
         self.falling_condition = self.speedy > 0 and self.fall_timer >= self.fall_duration
 
         self.crouch_timer = (self.crouch_timer + 1) if self.down and (self.sync_crouch and not self.falling_condition) else 0
@@ -2252,6 +2285,12 @@ class Player:
             self.frame_timer += abs(self.speedx) / 1.25
             self.anim_state = self.frame_data["fall"] + ((int(self.frame_timer * self.frame_speeds["run"]) % self.frame_group["run"]) if self.frame_loops["run"] else min(int(self.frame_timer * self.frame_speeds["run"]), self.frame_group["run"] - 1))
 
+        if self.just_spawned and self.controls_enabled:
+            self.speedx = 0
+            self.rect.x = (spawnposx * 16) + self.player_number * 8
+            self.rect.y = (spawnposy * 16) + 8
+
+        self.rect.x = range_number(self.rect.x, 0, camera.x + SCREEN_WIDTH)
         self.just_spawned = False
 
     def draw(self):
@@ -2290,6 +2329,10 @@ class Player:
 
                 star_mask.fill(colors[color_index], special_flags=pygame.BLEND_RGBA_MULT)
                 screen.blit(star_mask, (draw_x, draw_y))
+
+                if self.star_trail_timer >= self.star_trail_duration * 60 and nor(self.piping, self.dead):
+                    self.star_trail_timer -= self.star_trail_duration * 60
+                    trails.append(Trail(draw_x, draw_y, star_mask))
 
 mus_vol = snd_vol = 1
 
@@ -2430,6 +2473,7 @@ overlays = []
 player_lives = []
 player_sizes = []
 players_hud = []
+trails = []
 world = 0
 course = 0
 lives = get_game_property("lives") or 3
@@ -2536,6 +2580,7 @@ while running:
 
     if not old_asset_directory == asset_directory:
         old_asset_directory = asset_directory
+        pygame.display.set_icon(pygame.image.load(load_asset("icon.ico")))
         reload_sounds()
         logo.spritesheet = load_sprite("logo")
         text.font = pygame.font.Font(load_asset("font.ttf"), text.font_size)
@@ -2563,16 +2608,16 @@ while running:
                 binding_key = False
                 current_bind = False
             elif game_ready:
-                initialize_game()
                 course += 1
                 while not exists(load_local_file(f"courses/{course_directory}/{world}-{course}.json")):
                     course = 1
                     world += 1
+                initialize_game()
                 create_course(load_json(f"courses/{course_directory}/{world}-{course}"))
                 if time > 100:
                     bgm_player.play_music(main_music)
                 for i in range(player_count):
-                    players.append(Player(x=spawnposx + i * 8, y=spawnposy, player_number=i, lives=player_lives[i]))
+                    players.append(Player(player_number=i, lives=player_lives[i]))
                     power_meters.append(PowerMeter(players[i]))
                     players_hud.append(PlayerHUD(players[i]))
             elif reset_ready:
@@ -2581,7 +2626,7 @@ while running:
                 if time > 100:
                     bgm_player.play_music(main_music)
                 for i in range(player_count):
-                    players.append(Player(x=spawnposx + i * 8, y=spawnposy, player_number=i, lives=player_lives[i]))
+                    players.append(Player(player_number=i, lives=player_lives[i]))
                     power_meters.append(PowerMeter(players[i]))
                     players_hud.append(PlayerHUD(players[i]))
             elif everyone_dead:
@@ -2602,7 +2647,7 @@ while running:
                     for i in range(player_count):
                         if player_lives[i] == 0:
                             player_lives[i] = lives
-                        players.append(Player(x=spawnposx + i * 8, y=spawnposy, player_number=i, lives=player_lives[i]))
+                        players.append(Player(x=(spawnposx * 16) + i * 8, y=(spawnposy * 16) + 8, player_number=i, lives=player_lives[i]))
                         power_meters.append(PowerMeter(players[i]))
                         players_hud.append(PlayerHUD(players[i]))
 
@@ -2911,6 +2956,11 @@ while running:
                     enemies.remove(enemy)
             if enemy.below_camera():
                 enemies.remove(enemy)
+
+        for trail in trails:
+            trail.draw()
+            if nor(any(player.size_change for player in players), everyone_dead, pause):
+                trail.update()
 
         player_lives = [player.lives for player in players]
         player_sizes = [player.size for player in players]
