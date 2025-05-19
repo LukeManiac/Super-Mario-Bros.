@@ -2,6 +2,7 @@ import pygame, json, numpy, psutil, sys
 from os.path import dirname, abspath, exists, getsize, isdir
 from os import listdir, makedirs
 from datetime import datetime
+from subprocess import Popen as open_program
 
 class CustomError(Exception):
     def __init__(self, name, message):
@@ -792,7 +793,7 @@ class PlayerHUD:
             pass
 
 class Tile:
-    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False, breakable=False, item=None, item_spawn_anim=True, item_sound=sprout_sound, is_ground=False):
+    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False, breakable=False, item=None, item_spawn_anim=True, item_sound=None, is_ground=False):
         self.x = x * 16
         self.y = y * 16 + 8
         self.og_x, self.og_y = x, y
@@ -2225,6 +2226,8 @@ class Player:
                 self.speedy = 0
                 self.fall_timer = 0
                 self.falling = True
+                if abs(self.speedx) > WALK_SPEED:
+                    self.speedx = max(self.speedx - self.acceleration, WALK_SPEED) if self.speedx > 0 else min(self.speedx + self.acceleration, -WALK_SPEED)
             else:
                 if not self.size_change:
                     self.speedy += self.gravity * (2 if self.fall_timer >= self.fall_duration and not self.jump else 1)
@@ -2570,24 +2573,8 @@ while running:
             }, settings, indent=4)
 
     if not old_asset_directory == asset_directory:
-        old_asset_directory = asset_directory
-        pygame.display.set_icon(pygame.image.load(load_asset("icon.ico")))
-        reload_sounds()
-        logo.spritesheet = load_sprite("logo")
-        text.font = pygame.font.Font(load_asset("font.ttf"), text.font_size)
-        bgm_player.play_music("title")
-        sound_player.play_sound(coin_sound)
-        title_ground.sprite = split_image(load_sprite("tiles_ground"), 8, 6)
-        camera.x = 0
-        camera.y = 0
-        intro_players = [Player(x=centerx - player_dist / 2 + player_dist * i, y=SCREEN_HEIGHT, controls_enabled=False, size=1, player_number=i) for i in count_list_items(characters_name)]
-        camera.update(intro_players, max_y=0)
-        for tile in tiles:
-            if getattr(tile, "item_sound", None) == sprout_sound:
-                setattr(tile, "item_sound", sprout_sound)
-        for player in intro_players:
-            player.speedx = 2
-            player.walk_cutscene = True
+        open_program([sys.executable] + sys.argv)
+        sys.exit()
 
     if fade_in:
         fade_out = False
