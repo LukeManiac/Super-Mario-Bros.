@@ -13,7 +13,7 @@ pygame.mixer.init()
 
 infinity = float("inf")
 pi = 3.141592653589793
-main_directory = dirname(sys.executable if getattr(sys, 'frozen', False) else abspath(__file__))
+main_directory = dirname(sys.executable if getattr(sys, "frozen", False) else abspath(__file__))
 
 def set_image_alpha(image, alpha=1):
     try:
@@ -265,20 +265,6 @@ def create_pipe(x, y, length=2, can_enter=False, new_zone=None, pipe_dir="up", c
 
     return pipes
 
-def recolor_surface(surface, old_color, new_color):
-    recolored = surface.copy()
-    pixel_array = pygame.PixelArray(recolored)
-
-    for x in range(recolored.get_width()):
-        for y in range(recolored.get_height()):
-            pixel = recolored.unmap_rgb(pixel_array[x, y])
-            if pixel[:3] == tuple(old_color):
-                new_pixel = recolored.map_rgb([*new_color, pixel[3]])
-                pixel_array[x, y] = new_pixel
-
-    del pixel_array
-    return recolored
-
 def scale_image(image, scale_factor=1):
     if isinstance(scale_factor, (int, float)):
         new_width = int(image.get_width() * abs(scale_factor))
@@ -365,7 +351,7 @@ RUN_SPEED = get_game_property("character_properties", "run_speed")
 JUMP_HOLD_TIME = 10
 MIN_SPEEDX = 0.25
 FPS = 60
-FADE_DURATION = 60
+FADE_DURATION = 30
 SPROUT_SPEED = 1
 
 beep_sound = load_sound("beep")
@@ -402,7 +388,7 @@ class Trail:
             trails.remove(self)
 
     def draw(self):
-        screen.blit(set_image_alpha(self.image, self.alpha), (self.x + (self.camera_x - camera.x), self.y - (self.camera_y - camera.y)))
+        screen.blit(set_image_alpha(self.image, self.alpha), (self.x + (self.camera_x - camera.x), self.y + (self.camera_y - camera.y)))
 
 class PipeMarker:
     def __init__(self, x, y, pipe_dir, zone):
@@ -505,7 +491,7 @@ class BGMPlayer:
 
     def fade_out(self):
         self.music_playing = False
-        pygame.mixer.music.fadeout(int(FADE_DURATION * (1000 / 60)))
+        pygame.mixer.music.fadeout(int(FADE_DURATION * (1000 / clock.get_fps())))
 
     def pause_music(self):
         if nitpicks["play_music_in_pause"]:
@@ -530,11 +516,6 @@ class Text:
 
     def create_text(self, text, position, color=(255, 255, 255), alignment="left", stickxtocamera=False, stickytocamera=False, scale=1):
         x, y = position
-
-        if stickxtocamera and camera:
-            x += camera.x
-        if stickytocamera and camera:
-            y += camera.y
 
         lines = text.split("\n")
         rendered_lines = []
@@ -581,7 +562,7 @@ class Text:
             elif alignment == "right":
                 line_x -= text_width
 
-            screen.blit(text_surface, (line_x - (camera.x if stickxtocamera else 0), line_y - (camera.y if stickytocamera else 0)))
+            screen.blit(text_surface, (line_x - (0 if stickxtocamera else camera.x), line_y - (0 if stickytocamera else camera.y)))
 
 class Background:
     def __init__(self):
@@ -625,13 +606,16 @@ class Background:
                 layer_x += self.layer_width
 
 class Camera:
-    def __init__(self):
+    def __init__(self, smoothing=1):
         self.x = 0
         self.y = 0
+        self.smoothing = 1 if smoothing == 0 else smoothing
 
     def update(self, players, max_x=None, max_y=None):
-        self.x = range_number(mean(*[player.rect.x + player.rect.width for player in players]) - SCREEN_WIDTH // 2, 0, max_x if max_x is not None else infinity)
-        self.y = range_number(mean(*[player.rect.y + player.rect.height for player in players]) - SCREEN_HEIGHT // 2, 0, max_y if max_y is not None else infinity)
+        self.x += (((mean(*[player.rect.x + player.rect.width // 2 for player in players])) - SCREEN_WIDTH // 2) - self.x) / self.smoothing
+        self.y += (((mean(*[player.rect.y + player.rect.height // 2 for player in players])) - SCREEN_HEIGHT // 2) - self.y) / self.smoothing
+        self.x = range_number(self.x, 0, max_x if max_x is not None else infinity)
+        self.y = range_number(self.y, 0, max_y if max_y is not None else infinity)
 
 class Logo:
     def __init__(self):
@@ -796,7 +780,7 @@ class PlayerHUD:
                 cycle_time = 2 if self.star_timer >= 1 else 1
 
                 if pause or everyone_dead:
-                    color_index = self.last_color_index if hasattr(self, 'last_color_index') else 0
+                    color_index = self.last_color_index if hasattr(self, "last_color_index") else 0
                 else:
                     self.time_passed = pygame.time.get_ticks()
                     color_index = int((self.time_passed % (1250 / cycle_time)) / ((1250 / cycle_time) / len(colors)))
@@ -1531,6 +1515,7 @@ class Koopa:
 
     def update(self):
         if self.shotted:
+            self.dt += 1
             self.angle = 180 if get_game_property("enemies", "classic_death_anim") else (self.angle - (self.speedx * 4))
             self.x += self.speedx
             self.y += self.speedy
@@ -1622,6 +1607,7 @@ class Koopa:
         self.stomped = False
         self.speedx = 2 if self.speedx < 0 else -2
         self.speedy = -pi
+        self.dt = 0
 
         if culprit:
             try:
@@ -1680,7 +1666,7 @@ class Player:
         self.frame_loops = self.character_data["frame_loops"]
         self.frame_speeds = self.character_data["frame_speeds"]
         self.acceleration = self.character_data["acceleration"]
-        self.max_jump = self.character_data["max_jump"]
+        self.max_jump = self.character_data["max_jump"] + 0.5
         self.color = self.character_data["color"]
         self.frame_data = {}
         self.prev_key = 0
@@ -1714,7 +1700,9 @@ class Player:
         self.run = False
         self.jump = False
         self.prev_run = False
+        self.prev_jump = False
         self.run_lock = False
+        self.jump_lock = False
         self.img_width, self.img_height = self.spritesheet.get_size()
         self.rect = pygame.Rect(x, y, self.img_width, self.img_height)
         self.sprites = [[pygame.Rect(x * self.quad_width, y * self.quad_height, self.quad_width, self.quad_height) for x in range(self.img_width // self.quad_width)] for y in range(self.img_height // self.quad_height)]
@@ -1723,7 +1711,7 @@ class Player:
         self.controls = [globals()[f"controls{i+1}" if i else "controls"] for i in count_list_items(characters_data)][player_number]
         self.skidding = False
         self.gravity = 0.25
-        self.min_jump = 1
+        self.min_jump = 0.5
         self.run_timer = 0
         self.update_hitbox()
         self.rect.y -= self.rect.height - (0 if self.size == 0 else 12)
@@ -1908,6 +1896,7 @@ class Player:
             self.speed = (RUN_SPEED * (1.25 if self.pspeed else 1) if self.run else WALK_SPEED) * (1.25 if self.star else 1)
 
             self.run_lock = self.run and not self.prev_run
+            self.jump_lock = self.jump and not self.prev_jump
 
             if self.size == 2 and len(fireballs_table[str(self.player_number)]) < max_fireballs and not self.down:
                 if self.run:
@@ -1958,7 +1947,7 @@ class Player:
                     if self.midair_turn:
                         self.facing_right = True
 
-            if self.fall_timer < self.fall_duration and self.jump and not self.jump and self.jump_timer == 0:
+            if self.fall_timer < self.fall_duration and self.jump_lock and self.jump_timer == 0:
                 self.speedy = -self.min_jump
                 self.jump_timer = 1
             elif self.jump and 0 < self.jump_timer < JUMP_HOLD_TIME:
@@ -2237,13 +2226,15 @@ class Player:
                 self.fall_timer = 0
                 self.falling = True
             else:
-                self.speedy += self.gravity
+                if not self.size_change:
+                    self.speedy += self.gravity * (2 if self.fall_timer >= self.fall_duration and not self.jump else 1)
                 self.fall_timer += 0.025
                 if not self.falling:
                     self.falling = True
                     self.fall_timer = 0
 
             self.prev_run = self.run
+            self.prev_jump = self.jump
 
         self.star_trail_timer = (self.star_trail_timer + 1) if self.star else 0
 
@@ -2321,7 +2312,7 @@ class Player:
                 cycle_speed = 1.25
 
                 if pause:
-                    color_index = self.last_color_index if hasattr(self, 'last_color_index') else 0
+                    color_index = self.last_color_index if hasattr(self, "last_color_index") else 0
                 else:
                     self.time_passed = pygame.time.get_ticks()
                     color_index = int((self.time_passed % ((cycle_speed * 1000) / cycle_time)) / (((cycle_speed * 1000) / cycle_time) / len(colors)))
@@ -2454,7 +2445,7 @@ pygame.display.set_caption(f"Super Mario Bros. for Python (FPS: {round(clock.get
 player_dist = 20
 intro_players = [Player(x=centerx - player_dist / 2 + player_dist * i, y=SCREEN_HEIGHT, controls_enabled=False, size=1, player_number=i) for i in count_list_items(characters_name)]
 players = []
-camera = Camera()
+camera = Camera(get_game_property("camera_smoothness"))
 bgm_player = BGMPlayer()
 sound_player = SFXPlayer()
 title_ground = TitleGround()
@@ -2587,8 +2578,13 @@ while running:
         bgm_player.play_music("title")
         sound_player.play_sound(coin_sound)
         title_ground.sprite = split_image(load_sprite("tiles_ground"), 8, 6)
+        camera.x = 0
+        camera.y = 0
         intro_players = [Player(x=centerx - player_dist / 2 + player_dist * i, y=SCREEN_HEIGHT, controls_enabled=False, size=1, player_number=i) for i in count_list_items(characters_name)]
         camera.update(intro_players, max_y=0)
+        for tile in tiles:
+            if getattr(tile, "item_sound", None) == sprout_sound:
+                setattr(tile, "item_sound", sprout_sound)
         for player in intro_players:
             player.speedx = 2
             player.walk_cutscene = True
@@ -2620,6 +2616,8 @@ while running:
                     players.append(Player(player_number=i, lives=player_lives[i]))
                     power_meters.append(PowerMeter(players[i]))
                     players_hud.append(PlayerHUD(players[i]))
+                    camera.x = 0
+                    camera.y = 0
             elif reset_ready:
                 initialize_game()
                 create_course(load_json(f"courses/{course_directory}/{world}-{course}"))
@@ -2629,6 +2627,8 @@ while running:
                     players.append(Player(player_number=i, lives=player_lives[i]))
                     power_meters.append(PowerMeter(players[i]))
                     players_hud.append(PlayerHUD(players[i]))
+                    camera.x = 0
+                    camera.y = 0
             elif everyone_dead:
                 if all(player.lives == 0 for player in players):
                     fade_out = True
@@ -2647,9 +2647,11 @@ while running:
                     for i in range(player_count):
                         if player_lives[i] == 0:
                             player_lives[i] = lives
-                        players.append(Player(x=(spawnposx * 16) + i * 8, y=(spawnposy * 16) + 8, player_number=i, lives=player_lives[i]))
+                        players.append(Player(player_number=i, lives=player_lives[i]))
                         power_meters.append(PowerMeter(players[i]))
                         players_hud.append(PlayerHUD(players[i]))
+                        camera.x = 0
+                        camera.y = 0
 
     elif fade_out:
         fade_in = False
@@ -2877,7 +2879,7 @@ while running:
         background_manager.draw()
 
         try:
-            if nor(any(player.piping for player in players), everyone_dead):
+            if nor(any(player.piping for player in players), everyone_dead, pause, fade_in, fade_out):
                 camera.update([player for player in players if not player.dead], x_range, y_range - 400)
         except ZeroDivisionError:
             pass
@@ -2921,6 +2923,11 @@ while running:
             if not pause:
                 tile.update()
 
+        for trail in trails:
+            trail.draw()
+            if nor(any(player.size_change for player in players), everyone_dead, pause):
+                trail.update()
+
         for fireball_list in fireballs_table.values():
             for fireball in fireball_list[:]:
                 if fireball.is_visible():
@@ -2956,11 +2963,6 @@ while running:
                     enemies.remove(enemy)
             if enemy.below_camera():
                 enemies.remove(enemy)
-
-        for trail in trails:
-            trail.draw()
-            if nor(any(player.size_change for player in players), everyone_dead, pause):
-                trail.update()
 
         player_lives = [player.lives for player in players]
         player_sizes = [player.size for player in players]
@@ -3051,7 +3053,7 @@ while running:
         if players_hud:
             for player_hud in players_hud:
                 player_hud.draw()
-                if nor(everyone_dead, pause):
+                if nor(everyone_dead, pause, pipe_ready):
                     player_hud.update()
 
                 for player in players:
