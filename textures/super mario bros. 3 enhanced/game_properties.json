@@ -1,0 +1,59 @@
+{
+    "^": "Core configuration settings for the game, including constants, character properties, animations, physics, and sound loop points.",
+    "animation_speed": {"fire flower": 0.125},
+    "character_properties": {
+        "quad_width": 24,
+        "midair_turn": true,
+        "character_data": [
+            {
+                "frames": {
+                    "dead": 1,
+                    "swim": 4,
+                    "swimpush": 2
+                },
+                "frame_speeds": {"dead": 1}
+            },
+            {
+                "frames": {
+                    "jump": 3,
+                    "fall": 3,
+                    "dead": 1,
+                    "swim": 4,
+                    "swimpush": 2
+                },
+                "frame_speeds": {"dead": 1}
+            },
+            {
+                "frames": {
+                    "dead": 1,
+                    "swim": 4,
+                    "swimpush": 2
+                },
+                "frame_speeds": {"dead": 1}
+            },
+            {
+                "frames": {
+                    "dead": 1,
+                    "swim": 4,
+                    "swimpush": 2
+                },
+                "frame_speeds": {"dead": 1}
+            }
+        ]
+    },
+    "enemies": {
+        "classic_death_anim": false,
+        "goomba": {"frames": {"shot": 1}},
+        "koopa": {
+            "offsety": 2,
+            "shell_death_anim": true
+        }
+    },
+    "font_outline": true,
+    "lives": 5,
+    "loop_points": {
+        "overworld": 3480,
+        "overworld_fast": 2907,
+        "title": 5247
+    }
+}
