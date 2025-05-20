@@ -162,6 +162,7 @@ def xor(a, b):
     return (a or b) and not (a and b)
 
 def create_course(data):
+    pygame.display.update()
     default_music = {
         "main_music": data["music"] if key_exists(data, "music") else "overworld",
         "clear_music": f"{main_music}_clear" if exists(f"{main_music}_clear") else "clear",
@@ -213,8 +214,7 @@ def create_course(data):
     globals()["tiles"] = tiles
 
     if key_exists(data, "spawnpositions") and isinstance(data["spawnpositions"], list):
-        globals()["spawnposx"] = data["spawnpositions"][0]
-        globals()["spawnposy"] = data["spawnpositions"][1]
+        globals()["spawnposx"], globals()["spawnposy"] = data["spawnpositions"]
 
     for category, items in data.items():
         if key_exists(("tiles", "castle", "background", "tileset"), category):
@@ -375,12 +375,9 @@ sprout_sound = load_sound("sprout")
 stomp_sound = load_sound("stomp")
 
 class Trail:
-    def __init__(self, x, y, image):
-        self.x = x
-        self.y = y
+    def __init__(self, image, position):
         self.image = image
-        self.camera_x = camera.x
-        self.camera_y = camera.y
+        self.x, self.y = position
         self.alpha = 1
     
     def update(self):
@@ -389,7 +386,7 @@ class Trail:
             trails.remove(self)
 
     def draw(self):
-        screen.blit(set_image_alpha(self.image, self.alpha), (self.x + (self.camera_x - camera.x), self.y + (self.camera_y - camera.y)))
+        screen.blit(set_image_alpha(self.image, self.alpha), (self.x - camera.x, self.y - camera.y))
 
 class PipeMarker:
     def __init__(self, x, y, pipe_dir, zone):
@@ -909,7 +906,7 @@ class Tile:
         
         self.image_scale = 1 - (self.y_offset / 8)
         try:
-            self.sprite = scale_image(self.image if self.is_ground else self.image.subsurface(self.sprites[self.spriteset]), self.image_scale)
+            self.sprite = (self.image if self.is_ground else self.image.subsurface(self.sprites[self.spriteset])) if self.image_scale == 1 else scale_image(self.image if self.is_ground else self.image.subsurface(self.sprites[self.spriteset]), self.image_scale)
         except:
             self.sprite = None
 
@@ -926,7 +923,7 @@ class Tile:
 
     def draw(self):
         if nor(self.sprite is None, self.broken):
-            screen.blit(self.sprite, (self.x - camera.x - (self.sprite.get_width() / 2) + 16, self.y - camera.y + (0 if nitpicks["inverted_block_bounce"] else (self.y_offset * 4))))
+            screen.blit(self.sprite, (self.x - camera.x - (self.sprite.get_width() / (1 if self.image_scale == 1 else 2)) + 16, self.y - camera.y + (0 if nitpicks["inverted_block_bounce"] else (self.y_offset * 4))))
 
 class Ground(Tile):
     def __init__(self, x, y, tile_index=1, tileset="ground"):
@@ -951,7 +948,7 @@ class AnimatedTile(Tile):
         super().update()
         self.frame_index = int((dt / (60 / self.cols) / self.anim_speed) % self.total_frames)
         try:
-            self.sprite = scale_image(self.image.subsurface(self.sprites[self.spriteset if not self.hit else 0][self.frame_index if nor(self.broken, self.hit) else 0]), self.image_scale)
+            self.sprite = (self.image.subsurface(self.sprites[self.spriteset if not self.hit else 0][self.frame_index if nor(self.broken, self.hit) else 0])) if self.image_scale == 1 else scale_image(self.image.subsurface(self.sprites[self.spriteset if not self.hit else 0][self.frame_index if nor(self.broken, self.hit) else 0]), self.image_scale)
         except:
             self.sprite = None
 
@@ -1662,6 +1659,7 @@ class Player:
         self.midair_turn = self.properties["midair_turn"]
         self.quad_width = self.properties["quad_width"]
         self.quad_height = self.properties["quad_height"]
+        self.star_duration = self.properties["star_duration"]
         self.character_data = self.properties["character_data"][player_number]
         self.frame_group = self.character_data["frames"]
         self.frame_loops = self.character_data["frame_loops"]
@@ -1755,7 +1753,6 @@ class Player:
         self.prev_bottom = None
         self.star_trail_timer = 0
         self.star_trail_duration = 0.0625
-        self.just_spawned = True
         self.update_hitbox()
 
     def add_life(self):
@@ -1808,14 +1805,15 @@ class Player:
                     self.fall_timer = 0 if furthest_player.fall_timer < furthest_player.fall_duration else self.fall_duration
                     self.jump_timer = 0 if furthest_player.fall_timer < furthest_player.fall_duration else 1
                     self.shrunk = True
+                    self.respawning = True
         else:
-            self.left = (keys[self.controls["left"]]) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
-            self.right = (keys[self.controls["right"]]) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
-            self.up = (keys[self.controls["up"]]) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
-            self.down = (keys[self.controls["down"]] if self.fall_timer < self.fall_duration else self.down) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
-            self.down_key = (keys[self.controls["down"]]) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
-            self.run = (keys[self.controls["run"]]) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
-            self.jump = (keys[self.controls["jump"]]) if self.controls_enabled and self.can_control and nor(self.piping, self.just_spawned) else False
+            self.left = (keys[self.controls["left"]]) if self.controls_enabled and self.can_control and not self.piping else False
+            self.right = (keys[self.controls["right"]]) if self.controls_enabled and self.can_control and not self.piping else False
+            self.up = (keys[self.controls["up"]]) if self.controls_enabled and self.can_control and not self.piping else False
+            self.down = (keys[self.controls["down"]] if self.fall_timer < self.fall_duration else self.down) if self.controls_enabled and self.can_control and not self.piping else False
+            self.down_key = (keys[self.controls["down"]]) if self.controls_enabled and self.can_control and not self.piping else False
+            self.run = (keys[self.controls["run"]]) if self.controls_enabled and self.can_control and not self.piping else False
+            self.jump = (keys[self.controls["jump"]]) if self.controls_enabled and self.can_control and not self.piping else False
 
             if self.kicked_shell:
                 self.kicked_timer += 1
@@ -2195,7 +2193,7 @@ class Player:
                     elif isinstance(item, Star):
                         overlays.append(Score(item.x - camera.x, item.y - camera.y, 1000))
                         self.star = True
-                        self.star_timer = 12
+                        self.star_timer = self.star_duration
                         items.remove(item)
                         sound_player.play_sound(powerup_sound)
                     else:
@@ -2279,13 +2277,7 @@ class Player:
             self.frame_timer += abs(self.speedx) / 1.25
             self.anim_state = self.frame_data["fall"] + ((int(self.frame_timer * self.frame_speeds["run"]) % self.frame_group["run"]) if self.frame_loops["run"] else min(int(self.frame_timer * self.frame_speeds["run"]), self.frame_group["run"] - 1))
 
-        if self.just_spawned and self.controls_enabled:
-            self.speedx = 0
-            self.rect.x = (spawnposx * 16) + self.player_number * 8
-            self.rect.y = (spawnposy * 16) + 8
-
         self.rect.x = range_number(self.rect.x, 0, camera.x + SCREEN_WIDTH)
-        self.just_spawned = False
 
     def draw(self):
         if self.can_draw:
@@ -2326,7 +2318,7 @@ class Player:
 
                 if self.star_trail_timer >= self.star_trail_duration * 60 and nor(self.piping, self.dead):
                     self.star_trail_timer -= self.star_trail_duration * 60
-                    trails.append(Trail(draw_x, draw_y, star_mask))
+                    trails.append(Trail(star_mask, (draw_x + camera.x, draw_y + camera.y)))
 
 mus_vol = snd_vol = 1
 
@@ -2426,6 +2418,9 @@ nitpicks_list = [
     "non-progressive_powerups"
 ]
 
+with open(load_local_file("nitpicks.json"), "w") as nitpicks:
+    json.dump({key: False for key in nitpicks_list}, nitpicks, indent=4)
+
 if exists(load_local_file("nitpicks.json")):
     data = load_json("nitpicks")
         
@@ -2434,7 +2429,8 @@ if exists(load_local_file("nitpicks.json")):
             data[key] = False
     
 with open(load_local_file("nitpicks.json"), "w") as nitpicks:
-    json.dump(data if exists(load_local_file("nitpicks.json")) else {key: False for key in nitpicks_list}, nitpicks, indent=4)
+    if exists(load_local_file("nitpicks.json")):
+        json.dump(data, nitpicks, indent=4)
 
 nitpicks = load_json("nitpicks")
 
@@ -2470,7 +2466,7 @@ players_hud = []
 trails = []
 world = 0
 course = 0
-lives = get_game_property("lives") or 3
+lives = get_game_property("lives")
 score = 0
 time = 0
 pipe_wait_timer = 0
@@ -2595,27 +2591,31 @@ while running:
                 while not exists(load_local_file(f"courses/{course_directory}/{world}-{course}.json")):
                     course = 1
                     world += 1
-                initialize_game()
+                initialize_game()                
                 create_course(load_json(f"courses/{course_directory}/{world}-{course}"))
+                camera.x = 0
+                camera.y = 0
                 if time > 100:
                     bgm_player.play_music(main_music)
                 for i in range(player_count):
-                    players.append(Player(player_number=i, lives=player_lives[i]))
+                    if player_lives[i] == 0:
+                        player_lives[i] = lives
+                    players.append(Player(x=(spawnposx * 16) + i * 8, y=((spawnposy - 4) * 16) - 1, player_number=i, lives=player_lives[i]))
                     power_meters.append(PowerMeter(players[i]))
                     players_hud.append(PlayerHUD(players[i]))
-                    camera.x = 0
-                    camera.y = 0
             elif reset_ready:
                 initialize_game()
                 create_course(load_json(f"courses/{course_directory}/{world}-{course}"))
+                camera.x = 0
+                camera.y = 0
                 if time > 100:
                     bgm_player.play_music(main_music)
                 for i in range(player_count):
-                    players.append(Player(player_number=i, lives=player_lives[i]))
+                    if player_lives[i] == 0:
+                        player_lives[i] = lives
+                    players.append(Player(x=(spawnposx * 16) + i * 8, y=((spawnposy - 4) * 16) - 1, player_number=i, lives=player_lives[i]))
                     power_meters.append(PowerMeter(players[i]))
                     players_hud.append(PlayerHUD(players[i]))
-                    camera.x = 0
-                    camera.y = 0
             elif everyone_dead:
                 if all(player.lives == 0 for player in players):
                     fade_out = True
@@ -2629,16 +2629,16 @@ while running:
                 else:
                     initialize_game()
                     create_course(load_json(f"courses/{course_directory}/{world}-{course}"))
+                    camera.x = 0
+                    camera.y = 0
                     if time > 100:
                         bgm_player.play_music(main_music)
                     for i in range(player_count):
                         if player_lives[i] == 0:
                             player_lives[i] = lives
-                        players.append(Player(player_number=i, lives=player_lives[i]))
+                        players.append(Player(x=(spawnposx * 16) + i * 8, y=((spawnposy - 4) * 16) - 1, player_number=i, lives=player_lives[i]))
                         power_meters.append(PowerMeter(players[i]))
                         players_hud.append(PlayerHUD(players[i]))
-                        camera.x = 0
-                        camera.y = 0
 
     elif fade_out:
         fade_in = False
@@ -2910,16 +2910,11 @@ while running:
             if not pause:
                 tile.update()
 
-        for trail in trails:
-            trail.draw()
-            if nor(any(player.size_change for player in players), everyone_dead, pause):
-                trail.update()
-
         for fireball_list in fireballs_table.values():
             for fireball in fireball_list[:]:
                 if fireball.is_visible():
                     fireball.draw()
-                    if not (any(player.size_change for player in players) or everyone_dead or pause or pipe_ready):
+                    if not (any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
                         fireball.update()
                 else:
                     fireball_list.remove(fireball)
@@ -2929,12 +2924,18 @@ while running:
                 if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
                     enemy.update()
 
+        for trail in trails:
+            trail.draw()
+            if nor(any(player.size_change for player in players), everyone_dead, pause):
+                trail.update()
+
         if any(player.size_change for player in players):
             for player in players:
                 if not player.piping:
                     player.draw()
-                if player.size_change and not pause:
-                    player.update()
+                if player.size_change:
+                    if not pause:
+                        player.update()
         else:
             for player in players:
                 if not player.piping:
@@ -2991,7 +2992,7 @@ while running:
                 bgm_player.play_music(main_music if all(player.star_timer < 1 for player in players) else star_music)
                 fast_music = True
 
-        if all(player.dead_timer >= get_game_property("character_properties", "death_timer") * 60 for player in players) and not bgm_player.is_playing(dead_music):
+        if all(player.dead_timer >= get_game_property("death_timer") * 60 for player in players) and not bgm_player.is_playing(dead_music):
             fade_in = True
 
         for debris_part in debris[:]:
@@ -3052,7 +3053,7 @@ while running:
                         scale=0.5
                     )
 
-        (sound_player.loop_sound if any(player.pspeed for player in players) and nor(sound_player.is_playing(jump_sound, jumpbig_sound), everyone_dead, pause, any(player.piping for player in players)) else sound_player.stop_sound)(pspeed_sound)
+        (sound_player.loop_sound if any(player.pspeed for player in players) and nor(everyone_dead, pause, any(player.piping for player in players)) else sound_player.stop_sound)(pspeed_sound)
         (sound_player.loop_sound if any(player.skidding for player in players) and nor(everyone_dead, pause, any(player.piping for player in players)) else sound_player.stop_sound)(skid_sound)
 
         pause_menu_options = [
@@ -3087,7 +3088,7 @@ while running:
             position=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2),
             alignment="center"
         )
-        if dt >= get_game_property("gameover_time"):
+        if dt >= get_game_property("gameover_time") * 60:
             text.create_text(
                 text="PRESS ANY KEY TO RESTART",
                 position=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 1.75),
