@@ -308,6 +308,7 @@ def initialize_game():
     globals()["title_ground"] = None
     globals()["castle"] = None
     globals()["dt"] = 0
+    globals()["game_dt"] = 0
     globals()["time"] = 0
     globals()["pipe_wait_timer"] = 0
     globals()["players"] = []
@@ -2519,6 +2520,7 @@ old_mus_vol = mus_vol
 old_snd_vol = snd_vol
 pipe_timer = 5
 dt = 0
+game_dt = 0
 menu_area = 1
 menu = True
 title = True
@@ -2577,8 +2579,8 @@ while running:
 
     if not old_asset_directory == asset_directory:
         old_asset_directory = asset_directory
-        sound_player.play_sound(coin_sound)
         reload_data()
+        sound_player.play_sound(coin_sound)
         title_ground.sprite = split_image(load_sprite("tiles_ground"), 8, 6)
         text.font = pygame.font.Font(load_asset("font.ttf"), text.font_size)
         logo.spritesheet = load_sprite("logo")
@@ -2644,6 +2646,7 @@ while running:
                     world = 0
                     course = 0
                     dt = 0
+                    game_dt = 0
                     pipe_wait_timer = 0
                 else:
                     initialize_game()
@@ -2878,7 +2881,9 @@ while running:
             dt += 1
 
         if nor(pause, everyone_dead, any(player.size_change for player in players), any(player.piping for player in players), any(player.clear for player in players), nitpicks["infinite_time"]):
-            course_time = ceil(time - dt/60)
+            game_dt += 1
+            
+        course_time = floor(game_dt/60) if get_game_property("use_elapsed_time") else ceil(time - (game_dt/get_game_property("timer_speed"))/60)
 
         background_manager.load_background(background)
         background_manager.update()
@@ -2974,7 +2979,7 @@ while running:
         player_lives = [player.lives for player in players]
         player_sizes = [player.size for player in players]
 
-        if course_time <= 0:
+        if course_time <= 0 and not get_game_property("use_elapsed_time"):
             if everyone_dead:
                 text.create_text(
                 text="TIME'S UP!",
@@ -3000,7 +3005,7 @@ while running:
                 bgm_player.play_music(star_music)
                 player.star_music = True
 
-        if course_time <= 100 and not fast_music:
+        if course_time <= 100 and nor(fast_music, get_game_property("use_elapsed_time")):
             if not main_music.endswith("fast"):
                 bgm_player.play_music("hurry")
                 if exists(load_asset(f"music/{main_music}.ogg")):
@@ -3032,6 +3037,8 @@ while running:
         if hud:
             hud.draw()
 
+            game_time = str(f"{format_number(floor(course_time // 3600), 2)}:{format_number(floor((course_time // 60) % 60), 2)}:{format_number(floor(course_time % 60), 2)}" if get_game_property("use_elapsed_time") else format_number(course_time, 3))
+
             text.create_text(
                 text=f"x{format_number(hud.coins, 2)}",
                 position=(20 + hud.image.get_width(), 16),
@@ -3048,14 +3055,14 @@ while running:
             )
 
             text.create_text(
-                text=f"{format_number(course_time, 3)}",
+                text=game_time,
                 position=(632, 32),
                 alignment="right",
                 stickxtocamera=True,
                 scale=0.5
             )
 
-            screen.blit(load_sprite("hudclock"), (632 - text.char_width - sum(text.font.render(char, True, (255, 255, 255)).get_width() / 2 for char in str(format_number(course_time, 3))), 32))
+            screen.blit(load_sprite("hudclock"), (632 - (len(game_time) + 1) * 8, 32))
 
         if players_hud:
             for player_hud in players_hud:
