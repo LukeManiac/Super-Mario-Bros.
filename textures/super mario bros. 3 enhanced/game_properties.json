@@ -55,5 +55,6 @@
         "overworld": 3480,
         "overworld_fast": 2907,
         "title": 5247
-    }
+    },
+    "timer_speed": 0.6
 }
