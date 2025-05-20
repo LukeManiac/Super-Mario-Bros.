@@ -2,7 +2,6 @@ import pygame, json, numpy, psutil, sys
 from os.path import dirname, abspath, exists, getsize, isdir
 from os import listdir, makedirs
 from datetime import datetime
-from subprocess import Popen as open_program
 
 class CustomError(Exception):
     def __init__(self, name, message):
@@ -324,7 +323,7 @@ def initialize_game():
     globals()["fireballs_table"] = {str(i): [] for i in range(player_count)}
     globals()["hud"] = CoinHUD()
 
-def reload_sounds():
+def reload_data():
     globals()["beep_sound"] = load_sound("beep")
     globals()["break_sound"] = load_sound("break")
     globals()["bump_sound"] = load_sound("bump")
@@ -343,6 +342,14 @@ def reload_sounds():
     globals()["skid_sound"] = load_sound("skid")
     globals()["sprout_sound"] = load_sound("sprout")
     globals()["stomp_sound"] = load_sound("stomp")
+    globals()["MAX_RUN_TIMER"] = get_game_property("character_properties", "max_run_timer") * 10
+    globals()["WALK_SPEED"] = get_game_property("character_properties", "walk_speed")
+    globals()["RUN_SPEED"] = get_game_property("character_properties", "run_speed")
+    globals()["characters_data"] = get_game_property("character_properties", "character_data")
+    globals()["characters_name"] = [get_game_property("character_properties", "character_data", i, "name") for i in count_list_items(characters_data)]
+    globals()["characters_color"] = [get_game_property("character_properties", "character_data", i, "color") for i in count_list_items(characters_data)]
+    globals()["lives"] = get_game_property("lives")
+    globals()["camera"] = Camera(get_game_property("camera_smoothness"))
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 640, 400
 MIN_RUN_TIMER = 0
@@ -2569,8 +2576,20 @@ while running:
             }, settings, indent=4)
 
     if not old_asset_directory == asset_directory:
-        open_program([sys.executable] + sys.argv)
-        sys.exit()
+        old_asset_directory = asset_directory
+        sound_player.play_sound(coin_sound)
+        reload_data()
+        title_ground.sprite = split_image(load_sprite("tiles_ground"), 8, 6)
+        text.font = pygame.font.Font(load_asset("font.ttf"), text.font_size)
+        logo.spritesheet = load_sprite("logo")
+        camera.x = 0
+        camera.y = 0
+        pygame.display.set_icon(pygame.image.load(load_asset("icon.ico")))
+        intro_players = [Player(x=centerx - player_dist / 2 + player_dist * i, y=SCREEN_HEIGHT, controls_enabled=False, size=1, player_number=i) for i in count_list_items(characters_name)]
+        bgm_player.play_music("title")
+        for player in intro_players:
+            player.speedx = 2
+            player.walk_cutscene = True
 
     if fade_in:
         fade_out = False
