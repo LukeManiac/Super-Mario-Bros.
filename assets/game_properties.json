@@ -285,6 +285,7 @@
         }
     },
     "gameover_time": 4,
+    "lives": 3,
     "loop_points": {
         "overworld": 2398,
         "overworld_fast": 1598,
@@ -293,5 +294,6 @@
         "title": true
     },
     "pitch_shot_sound": false,
-    "pitch_stomp_sound": false
+    "pitch_stomp_sound": false,
+    "timer_speed": 0.4
 }
