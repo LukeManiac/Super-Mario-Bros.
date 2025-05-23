@@ -219,7 +219,7 @@ def create_course(data):
         globals()["flagpole"] = globals()["Flagpole"](*data["flagpole"])
 
     if key_exists(data, "underwater") and isinstance(data["underwater"], bool):
-        globals()["underwater"] = data["underwater"]
+        globals()["underwater"] = data["underwater"] or nitpicks["underwater"]
 
     if key_exists(data, "vertical") and isinstance(data["vertical"], bool):
         globals()["vertical"] = data["vertical"]
@@ -1949,7 +1949,7 @@ class Player:
                     self.shrunk = True
                     self.respawning = True
         else:
-            self.gravity = 0.25 if underwater else 0.125
+            self.gravity = 0.125 if underwater else 0.25
             self.left = (keys[self.controls["left"]]) if self.controls_enabled and self.can_control and not self.piping else False
             self.right = (keys[self.controls["right"]]) if self.controls_enabled and self.can_control and not self.piping else False
             self.up = (keys[self.controls["up"]]) if self.controls_enabled and self.can_control and not self.piping else False
@@ -2092,7 +2092,7 @@ class Player:
             if underwater:
                 if self.jump and self.jump_timer == 0:
                     self.down = False
-                    self.speedy = -self.swim_height * (1.6 if self.up and not self.down else 0.625 if self.down and not self.up else 1)
+                    self.speedy = -self.swim_height * (1.25 if self.up and not self.down else 0.8 if self.down and not self.up else 1)
                     self.jump_timer = 1
                     self.fall_timer = self.fall_duration
                     self.swim_push_anim = True
@@ -2579,7 +2579,8 @@ nitpicks_list = [
     "show_battery",
     "show_time",
     "play_music_in_pause",
-    "non-progressive_powerups"
+    "non-progressive_powerups",
+    "always_underwater"
 ]
 
 if exists(load_local_file("nitpicks.json")):
