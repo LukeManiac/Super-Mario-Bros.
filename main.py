@@ -183,7 +183,6 @@ def create_course(data):
     globals()["y_range"] = (data["height"] if key_exists(data, "height") and isinstance(data["height"], int) else 25) * 16
     globals()["time"] = 100 if nitpicks["hurry_mode"] else (data["timelimit"] if key_exists(data, "timelimit") and isinstance(data["timelimit"], int) else 400)
     globals()["course_time"] = 100 if nitpicks["hurry_mode"] else (data["timelimit"] if key_exists(data, "timelimit") and isinstance(data["timelimit"], int) else 400)
-    globals()["underwater"] = key_exists(data, "underwater") and data["underwater"] == True
     
     tiles = []
     if key_exists(data, "tiles") and isinstance(data["tiles"], dict):
@@ -219,6 +218,9 @@ def create_course(data):
     if key_exists(data, "flagpole") and isinstance(data["flagpole"], list):
         globals()["flagpole"] = globals()["Flagpole"](*data["flagpole"])
 
+    if key_exists(data, "underwater") and isinstance(data["underwater"], bool):
+        globals()["underwater"] = data["underwater"]
+
     if key_exists(data, "vertical") and isinstance(data["vertical"], bool):
         globals()["vertical"] = data["vertical"]
 
@@ -233,7 +235,7 @@ def create_course(data):
         globals()["spawnposy"] = ((data["spawnpositions"][1] - 4) * 16) - 1
 
     for category, items in data.items():
-        if key_exists(("tiles", "castle", "background", "tileset", "flagpole"), category):
+        if key_exists(("tiles", "castle", "background", "tileset", "flagpole", "underwater", "vertical", "invertvertical"), category):
             continue
 
         object_list = []
@@ -361,6 +363,7 @@ def reload_data():
     globals()["skid_sound"] = load_sound("skid")
     globals()["sprout_sound"] = load_sound("sprout")
     globals()["stomp_sound"] = load_sound("stomp")
+    globals()["swim_sound"] = load_sound("swim")
     globals()["MAX_RUN_TIMER"] = get_game_property("character_properties", "max_run_timer") * 10
     globals()["WALK_SPEED"] = get_game_property("character_properties", "walk_speed")
     globals()["RUN_SPEED"] = get_game_property("character_properties", "run_speed")
@@ -399,6 +402,7 @@ shrink_sound = load_sound("shrink")
 skid_sound = load_sound("skid")
 sprout_sound = load_sound("sprout")
 stomp_sound = load_sound("stomp")
+swim_sound = load_sound("swim")
 
 class ProgressBar:
     def __init__(self):
@@ -427,7 +431,10 @@ class ProgressBar:
                 self.oldplayerdist = self.playerdist
 
     def get_bar_color(self):
-        color_start, color_mid, color_end = get_game_property("progress_bar_colors")
+        try:
+            color_start, color_mid, color_end = get_game_property("progress_bar_colors")
+        except:
+            raise CustomError("GamePropertyError", "Invalid type for 'progress_bar_colors' in game_properties.json: expected array, got {type(get_game_property('progress_bar_colors')).__name__}.")
 
         if self.progress <= 0.5:
             t = self.progress / 0.5
@@ -446,7 +453,6 @@ class ProgressBar:
         bar_full_width = self.bar_width + int(radius * 2) + 2
         bar_full_height = self.height + int(radius * 2) + 2
 
-        # Create a surface to draw the full bar
         full_surf = pygame.Surface((bar_full_width, bar_full_height), pygame.SRCALPHA)
         draw_left = radius + 1
         draw_top = radius + 1
@@ -458,24 +464,19 @@ class ProgressBar:
             pygame.draw.circle(surf, c, (draw_left + self.bar_width, draw_top + radius), radius)
             pygame.draw.rect(surf, c, pygame.Rect(draw_left, draw_top, self.bar_width, self.height))
 
-        # Draw outline if enabled
         if get_game_property("font_outline"):
             for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
                 offset_surf = pygame.Surface(full_surf.get_size(), pygame.SRCALPHA)
                 draw_shapes(offset_surf, outline_color)
                 full_surf.blit(offset_surf, (dx, dy))
 
-        # Draw the filled bar shape
         draw_shapes(full_surf, color)
 
-        # Calculate clipping area based on progress
         clip_width = int((self.bar_width + radius * 2) * self.progress)
         clip_rect = pygame.Rect(0, 0, clip_width, full_surf.get_height())
 
-        # Blit only the clipped part
         screen.blit(full_surf.subsurface(clip_rect), (left - radius - 1, top - radius - 1))
 
-        # Draw the percentage text
         text.create_text(
             text=f"{int(self.progress * 100)}%",
             position=(self.x, self.y),
@@ -1801,6 +1802,7 @@ class Player:
         self.frame_loops = self.character_data["frame_loops"]
         self.frame_speeds = self.character_data["frame_speeds"]
         self.acceleration = self.character_data["acceleration"]
+        self.swim_height = self.character_data["swim_height"]
         self.max_jump = self.character_data["max_jump"] + 0.5
         self.color = self.character_data["color"]
         self.frame_data = {}
@@ -1822,6 +1824,8 @@ class Player:
         self.crouch_timer = 0
         self.crouch_fall_timer = 0
         self.skid_timer = 0
+        self.swimming_timer = 0
+        self.swimpushing_timer = 0
         self.idle_timer = 0
         self.jumping_timer = 0
         self.falling_timer = 0
@@ -1862,6 +1866,7 @@ class Player:
         self.fire_duration = 10
         self.fire_lock = False
         self.speed = 0
+        self.swim_push_anim = False
         self.lives = lives
         self.dead = False
         self.dead_timer = 0
@@ -1944,6 +1949,7 @@ class Player:
                     self.shrunk = True
                     self.respawning = True
         else:
+            self.gravity = 0.25 if underwater else 0.125
             self.left = (keys[self.controls["left"]]) if self.controls_enabled and self.can_control and not self.piping else False
             self.right = (keys[self.controls["right"]]) if self.controls_enabled and self.can_control and not self.piping else False
             self.up = (keys[self.controls["up"]]) if self.controls_enabled and self.can_control and not self.piping else False
@@ -2029,7 +2035,7 @@ class Player:
                     self.anim_state = self.frame_data["crouchfall"] + ((int(self.frame_timer * self.frame_speeds["walk"]) % self.frame_group["walk"]) if self.frame_loops["walk"] else min(int(self.frame_timer * self.frame_speeds["walk"]), self.frame_group["walk"] - 1))
                 return
 
-            self.speed = (RUN_SPEED * (1.25 if self.pspeed else 1) if self.run else WALK_SPEED) * (1.25 if self.star else 1)
+            self.speed = WALK_SPEED if underwater else ((RUN_SPEED * (1.25 if self.pspeed else 1) if self.run else WALK_SPEED) * (1.25 if self.star else 1))
 
             self.run_lock = self.run and not self.prev_run
             self.jump_lock = self.jump and not self.prev_jump
@@ -2063,10 +2069,10 @@ class Player:
                     self.speedx *= (1 - self.acceleration)
                 else:
                     if self.left and not self.right:
-                        self.speedx = max(self.speedx - self.acceleration, -self.speed)
+                        self.speedx = max(self.speedx - self.acceleration, -self.speed / (1.625 if underwater else 1))
                         self.facing_right = False
                     elif self.right and not self.left:
-                        self.speedx = min(self.speedx + self.acceleration, self.speed)
+                        self.speedx = min(self.speedx + self.acceleration, self.speed / (1.625 if underwater else 1))
                         self.facing_right = True
                     else:
                         if not self.walk_cutscene:
@@ -2076,27 +2082,41 @@ class Player:
             else:
                 if self.left and not self.right:
                     self.speedx = max(self.speedx - self.acceleration, -self.speed)
-                    if self.midair_turn:
+                    if self.midair_turn or underwater:
                         self.facing_right = False
                 elif self.right and not self.left:
                     self.speedx = min(self.speedx + self.acceleration, self.speed)
-                    if self.midair_turn:
+                    if self.midair_turn or underwater:
                         self.facing_right = True
 
-            if self.fall_timer < self.fall_duration and self.jump_lock and self.jump_timer == 0:
-                self.speedy = -self.min_jump
-                self.jump_timer = 1
-            elif self.jump and 0 < self.jump_timer < JUMP_HOLD_TIME:
-                if self.jump_timer == 1:
+            if underwater:
+                if self.jump and self.jump_timer == 0:
+                    self.down = False
+                    self.speedy = -self.swim_height * (1.6 if self.up and not self.down else 0.625 if self.down and not self.up else 1)
+                    self.jump_timer = 1
                     self.fall_timer = self.fall_duration
-                    self.jump_speedx = 1 if self.stomp_jump else abs(self.speedx)
-                    if not self.stomp_jump:
-                        sound_player.play_sound(jump_sound if self.size == 0 else jumpbig_sound)
-                self.max_speedx_jump = (self.max_jump + (2 if self.pspeed else 1) / 2) if self.jump_speedx >= 1 else self.max_jump
-                self.speedy = max(self.speedy - self.max_speedx_jump, -self.max_speedx_jump)
-                self.jump_timer += 1
-            elif not self.jump:
-                self.jump_timer = 1 if self.fall_timer < self.fall_duration else 0
+                    self.swim_push_anim = True
+                    sound_player.play_sound(swim_sound)
+                elif not self.jump:
+                    self.jump_timer = 0
+            else:
+                if (self.fall_timer < self.fall_duration or underwater) and self.jump_lock and self.jump_timer == 0:
+                    self.speedy = -self.min_jump
+                    self.jump_timer = 1
+                elif self.jump and 0 < self.jump_timer < JUMP_HOLD_TIME:
+                    if self.jump_timer == 1:
+                        self.fall_timer = self.fall_duration
+                        self.jump_speedx = 1 if self.stomp_jump else abs(self.speedx)
+                        if underwater:
+                            self.down = False
+                        if not self.stomp_jump:
+                            sound_player.play_sound(jump_sound if self.size == 0 else jumpbig_sound)
+                    self.max_speedx_jump = (self.max_jump + (2 if self.pspeed else 1) / 2) if self.jump_speedx >= 1 else self.max_jump
+                    self.speedy = max(self.speedy - self.max_speedx_jump, -self.max_speedx_jump)
+                    if not underwater:
+                        self.jump_timer += 1
+                elif not self.jump:
+                    self.jump_timer = 1 if self.fall_timer < self.fall_duration else 0
 
             self.pspeed = self.run_timer >= MAX_RUN_TIMER
 
@@ -2147,7 +2167,7 @@ class Player:
             self.rect.y += self.speedy
             self.on_ground = False
 
-            self.speedy = min(self.speedy, 5)
+            self.speedy = min(self.speedy, 2.5 if underwater else 5)
 
             if self.size_change:
                 if self.can_control:
@@ -2365,7 +2385,7 @@ class Player:
                     self.speedx = max(self.speedx - self.acceleration, WALK_SPEED) if self.speedx > 0 else min(self.speedx + self.acceleration, -WALK_SPEED)
             else:
                 if not self.size_change:
-                    self.speedy += self.gravity * (2 if self.fall_timer >= self.fall_duration and not self.jump else 1)
+                    self.speedy += self.gravity * (2 if self.fall_timer >= self.fall_duration and nor(self.jump, underwater) else 1)
                 self.fall_timer += 0.025
                 if not self.falling:
                     self.falling = True
@@ -2385,6 +2405,8 @@ class Player:
         self.jumping_timer = (self.jumping_timer + 1) if self.speedy < 0 and self.fall_timer >= self.fall_duration else 0
         self.falling_timer = (self.falling_timer + 1) if self.falling_condition else 0
         self.idle_timer = (self.idle_timer + 1) if abs(self.speedx) < MIN_SPEEDX else 0
+        self.swimming_timer = (self.swimming_timer + 1) if self.fall_timer >= self.fall_duration and underwater else 0
+        self.swimpushing_timer = (self.swimpushing_timer + 1) if self.fall_timer >= self.fall_duration and underwater and self.swim_push_anim else 0
 
         if self.dead:
             self.frame_timer += 1 if self.dead_timer >= 30 and not self.death_anim else 0
@@ -2398,10 +2420,15 @@ class Player:
         elif self.skidding:
             self.anim_state = self.frame_data["walk"] + ((int(self.skid_timer * self.frame_speeds["skid"]) % self.frame_group["skid"]) if self.frame_loops["skid"] else min(int(self.skid_timer * self.frame_speeds["skid"]), self.frame_group["skid"] - 1))
             self.frame_timer = 0
-        elif self.speedy < 0:
+        elif self.fall_timer >= self.fall_duration and underwater:
+            self.anim_state = self.frame_data["swim" if self.swim_push_anim else "climb"] + ((int((self.swimpushing_timer if self.swim_push_anim else self.swimming_timer) * self.frame_speeds["swimpush" if self.swim_push_anim else "swim"]) % self.frame_group["swimpush" if self.swim_push_anim else "swim"]) if self.frame_loops["swimpush" if self.swim_push_anim else "swim"] else min(int((self.swimpushing_timer if self.swim_push_anim else self.swimming_timer) * self.frame_speeds["swimpush" if self.swim_push_anim else "swim"]), self.frame_group["swimpush" if self.swim_push_anim else "swim"] - 1))
+            if self.anim_state >= self.frame_data["swimpush"] - 1:
+                self.swim_push_anim = False
+            self.frame_timer = 0
+        elif self.speedy < 0 and not underwater:
             self.anim_state = self.frame_data["run" if self.pspeed else "skid"] + ((int(self.jumping_timer * self.frame_speeds["runjump" if self.pspeed else "jump"]) % self.frame_group["runjump" if self.pspeed else "jump"]) if self.frame_loops["runjump" if self.pspeed else "jump"] else min(int(self.jumping_timer * self.frame_speeds["runjump" if self.pspeed else "jump"]), self.frame_group["runjump" if self.pspeed else "jump"] - 1))
             self.frame_timer = 0
-        elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.down):
+        elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.down, underwater):
             self.anim_state = self.frame_data["runjump" if self.pspeed else "jump"] + ((int(self.falling_timer * self.frame_speeds["runfall" if self.pspeed else "fall"]) % self.frame_group["runfall" if self.pspeed else "fall"]) if self.frame_loops["runfall" if self.pspeed else "fall"] else min(int(self.falling_timer * self.frame_speeds["runfall" if self.pspeed else "fall"]), self.frame_group["runfall" if self.pspeed else "fall"] - 1))
             self.frame_timer = 0
         elif abs(self.speedx) < MIN_SPEEDX and self.on_ground:
