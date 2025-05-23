@@ -42,6 +42,12 @@ def ceil(x):
     i = int(x)
     return i if x == i or x < 0 else i + 1
 
+def lerp_color(color1, color2, t):
+    return [
+        floor(color1[i] + (color2[i] - color1[i]) * t)
+        for i in range(3)
+    ]
+
 def load_local_file(file):
     return f"{main_directory}/{file}"
 
@@ -210,13 +216,24 @@ def create_course(data):
     if key_exists(data, "width") and isinstance(data["width"], int):
         globals()["x_range"] = (data["width"] - (SCREEN_WIDTH / 16)) * 16
 
+    if key_exists(data, "flagpole") and isinstance(data["flagpole"], list):
+        globals()["flagpole"] = globals()["Flagpole"](*data["flagpole"])
+
+    if key_exists(data, "vertical") and isinstance(data["vertical"], bool):
+        globals()["vertical"] = data["vertical"]
+
+    if key_exists(data, "invertvertical") and isinstance(data["invertvertical"], bool):
+        globals()["invertvertical"] = data["invertvertical"]
+        globals()["vertical"] = False
+
     globals()["tiles"] = tiles
 
     if key_exists(data, "spawnpositions") and isinstance(data["spawnpositions"], list):
-        globals()["spawnposx"], globals()["spawnposy"] = data["spawnpositions"]
+        globals()["spawnposx"] = (data["spawnpositions"][0] * 16) + i * 8
+        globals()["spawnposy"] = ((data["spawnpositions"][1] - 4) * 16) - 1
 
     for category, items in data.items():
-        if key_exists(("tiles", "castle", "background", "tileset"), category):
+        if key_exists(("tiles", "castle", "background", "tileset", "flagpole"), category):
             continue
 
         object_list = []
@@ -323,6 +340,7 @@ def initialize_game():
     globals()["trails"] = []
     globals()["fireballs_table"] = {str(i): [] for i in range(player_count)}
     globals()["hud"] = CoinHUD()
+    globals()["progress_bar"] = ProgressBar()
 
 def reload_data():
     globals()["beep_sound"] = load_sound("beep")
@@ -361,7 +379,7 @@ JUMP_HOLD_TIME = 10
 MIN_SPEEDX = 0.25
 FPS = 60
 FADE_DURATION = 30
-SPROUT_SPEED = 1
+SPROUT_SPEED = 0.9125
 
 beep_sound = load_sound("beep")
 break_sound = load_sound("break")
@@ -381,6 +399,116 @@ shrink_sound = load_sound("shrink")
 skid_sound = load_sound("skid")
 sprout_sound = load_sound("sprout")
 stomp_sound = load_sound("stomp")
+
+class ProgressBar:
+    def __init__(self):
+        self.x = centerx
+        self.y = 8
+        self.playerdist = 0
+        self.oldplayerdist = 0
+        self.progress = 0
+        self.height = 8
+        self.bar_width = 100
+        self.circle_radius = self.height / 2
+
+    def update(self):
+        if vertical:
+            self.playerdist = min(mean(*[player.rect.y + player.rect.height // 2 for player in players]), self.oldplayerdist)
+        elif invertvertical:
+            self.playerdist = max(mean(*[player.rect.y + player.rect.height // 2 for player in players]), self.oldplayerdist)
+        else:
+            self.playerdist = max(mean(*[player.rect.x + player.rect.width // 2 for player in players]), self.oldplayerdist)
+        self.progress = floor(range_number((self.playerdist - spawnposx) / (flagpole.x - spawnposx), 0, 1) * 100) / 100
+        if vertical:
+            if self.playerdist <= self.oldplayerdist:
+                self.oldplayerdist = self.playerdist
+        else:
+            if self.playerdist > self.oldplayerdist:
+                self.oldplayerdist = self.playerdist
+
+    def get_bar_color(self):
+        color_start, color_mid, color_end = get_game_property("progress_bar_colors")
+
+        if self.progress <= 0.5:
+            t = self.progress / 0.5
+            return lerp_color(color_start, color_mid, t)
+        else:
+            t = (self.progress - 0.5) / 0.5
+            return lerp_color(color_mid, color_end, t)
+
+    def draw(self):
+        left = self.x - self.bar_width // 2
+        right = self.x + self.bar_width // 2
+        top = self.y + 12
+
+        color = self.get_bar_color()
+        radius = self.circle_radius
+        bar_full_width = self.bar_width + int(radius * 2) + 2
+        bar_full_height = self.height + int(radius * 2) + 2
+
+        # Create a surface to draw the full bar
+        full_surf = pygame.Surface((bar_full_width, bar_full_height), pygame.SRCALPHA)
+        draw_left = radius + 1
+        draw_top = radius + 1
+
+        outline_color = (0, 0, 0)
+
+        def draw_shapes(surf, c):
+            pygame.draw.circle(surf, c, (draw_left, draw_top + radius), radius)
+            pygame.draw.circle(surf, c, (draw_left + self.bar_width, draw_top + radius), radius)
+            pygame.draw.rect(surf, c, pygame.Rect(draw_left, draw_top, self.bar_width, self.height))
+
+        # Draw outline if enabled
+        if get_game_property("font_outline"):
+            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                offset_surf = pygame.Surface(full_surf.get_size(), pygame.SRCALPHA)
+                draw_shapes(offset_surf, outline_color)
+                full_surf.blit(offset_surf, (dx, dy))
+
+        # Draw the filled bar shape
+        draw_shapes(full_surf, color)
+
+        # Calculate clipping area based on progress
+        clip_width = int((self.bar_width + radius * 2) * self.progress)
+        clip_rect = pygame.Rect(0, 0, clip_width, full_surf.get_height())
+
+        # Blit only the clipped part
+        screen.blit(full_surf.subsurface(clip_rect), (left - radius - 1, top - radius - 1))
+
+        # Draw the percentage text
+        text.create_text(
+            text=f"{int(self.progress * 100)}%",
+            position=(self.x, self.y),
+            alignment="center",
+            color=color,
+            stickxtocamera=True,
+            stickytocamera=True,
+            scale=0.5
+        )
+
+class Flagpole:
+    def __init__(self, x, y, height=8):
+        self.x, self.y = x * 16, y * 16
+        self.image = [load_sprite("flagpole"), load_sprite("flag")]
+        self.height = height + 1
+        self.sprites = [pygame.Rect(0, 16 * i, 16, 16) for i in range(2)]
+        self.flag_sprite_count = get_game_property("flagpole", "frames")
+        self.flag_sprite_speed = get_game_property("flagpole", "speed")
+        self.flag_sprite_size = self.image[1].get_size()
+        self.flag_sprite = [pygame.Rect((self.flag_sprite_size[0] / self.flag_sprite_count) * i, 0, self.flag_sprite_size[0] / self.flag_sprite_count, self.flag_sprite_size[1]) for i in range(self.flag_sprite_count)]
+        self.dt = 0
+        self.frame_index = 0
+        self.flag_offset = 0
+
+    def update(self):
+        self.dt += 1
+        self.frame_index = int((self.dt / 60) / self.flag_sprite_speed) % self.flag_sprite_count
+
+    def draw(self):
+        screen.blit(self.image[0].subsurface(self.sprites[0]), (self.x - camera.x, self.y - camera.y - (self.height * 16)))
+        for i in range(self.height):
+            screen.blit(self.image[0].subsurface(self.sprites[1]), (self.x - camera.x, self.y - camera.y - (i * 16)))
+        screen.blit(self.image[1].subsurface(self.flag_sprite[self.frame_index]), (self.x - camera.x - ((self.flag_sprite_size[0] / self.flag_sprite_count) / 2), self.y - camera.y - ((self.height - 1) * 16)))
 
 class Trail:
     def __init__(self, image, position):
@@ -1781,6 +1909,7 @@ class Player:
     def update(self):
         if self.dead:
             if self.dead_timer == 0:
+                self.speedx = 0
                 self.frame_timer = 0
                 self.piping = False
                 self.run_timer = 0
@@ -2426,9 +2555,6 @@ nitpicks_list = [
     "non-progressive_powerups"
 ]
 
-with open(load_local_file("nitpicks.json"), "w") as nitpicks:
-    json.dump({key: False for key in nitpicks_list}, nitpicks, indent=4)
-
 if exists(load_local_file("nitpicks.json")):
     data = load_json("nitpicks")
         
@@ -2439,6 +2565,8 @@ if exists(load_local_file("nitpicks.json")):
 with open(load_local_file("nitpicks.json"), "w") as nitpicks:
     if exists(load_local_file("nitpicks.json")):
         json.dump(data, nitpicks, indent=4)
+    else:
+        json.dump({key: False for key in nitpicks_list}, nitpicks, indent=4)
 
 nitpicks = load_json("nitpicks")
 
@@ -2459,11 +2587,11 @@ title_ground = TitleGround()
 background_manager = Background()
 text = Text()
 logo = Logo()
+fireballs_table = {}
 tiles = []
 pipe_markers = []
 items = []
 enemies = []
-fireballs_table = {}
 debris = []
 power_meters = []
 particles = []
@@ -2478,7 +2606,9 @@ lives = get_game_property("lives")
 score = 0
 time = 0
 pipe_wait_timer = 0
+progress_bar = None
 castle = None
+flagpole = None
 x_range = None
 y_range = None
 spawnposx = None
@@ -2492,6 +2622,8 @@ tileset = None
 hud = None
 fade_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
 a = 255
+vertical = False
+invertvertical = False
 fade_in = False
 fade_out = False
 
@@ -2621,7 +2753,7 @@ while running:
                 for i in range(player_count):
                     if player_lives[i] == 0:
                         player_lives[i] = lives
-                    players.append(Player(x=(spawnposx * 16) + i * 8, y=((spawnposy - 4) * 16) - 1, player_number=i, lives=player_lives[i]))
+                    players.append(Player(x=spawnposx + (i * 8), y=spawnposy, player_number=i, lives=player_lives[i]))
                     power_meters.append(PowerMeter(players[i]))
                     players_hud.append(PlayerHUD(players[i]))
             elif reset_ready:
@@ -2634,7 +2766,7 @@ while running:
                 for i in range(player_count):
                     if player_lives[i] == 0:
                         player_lives[i] = lives
-                    players.append(Player(x=(spawnposx * 16) + i * 8, y=((spawnposy - 4) * 16) - 1, player_number=i, lives=player_lives[i]))
+                    players.append(Player(x=spawnposx + (i * 8), y=spawnposy, player_number=i, lives=player_lives[i]))
                     power_meters.append(PowerMeter(players[i]))
                     players_hud.append(PlayerHUD(players[i]))
             elif everyone_dead:
@@ -2658,7 +2790,7 @@ while running:
                     for i in range(player_count):
                         if player_lives[i] == 0:
                             player_lives[i] = lives
-                        players.append(Player(x=(spawnposx * 16) + i * 8, y=((spawnposy - 4) * 16) - 1, player_number=i, lives=player_lives[i]))
+                        players.append(Player(x=spawnposx + (i * 8), y=spawnposy, player_number=i, lives=player_lives[i]))
                         power_meters.append(PowerMeter(players[i]))
                         players_hud.append(PlayerHUD(players[i]))
 
@@ -2898,6 +3030,11 @@ while running:
         if castle:
             castle.draw()
 
+        if flagpole:
+            flagpole.draw()
+            if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
+                flagpole.update()
+
         for power_meter in power_meters:
             power_meter.draw()
             if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
@@ -2938,7 +3075,7 @@ while running:
             for fireball in fireball_list[:]:
                 if fireball.is_visible():
                     fireball.draw()
-                    if not (any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
+                    if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
                         fireball.update()
                 else:
                     fireball_list.remove(fireball)
@@ -2975,6 +3112,10 @@ while running:
                     enemies.remove(enemy)
             if enemy.below_camera():
                 enemies.remove(enemy)
+
+        if progress_bar:
+            progress_bar.draw()
+            progress_bar.update()
 
         player_lives = [player.lives for player in players]
         player_sizes = [player.size for player in players]
@@ -3062,7 +3203,7 @@ while running:
                 scale=0.5
             )
 
-            screen.blit(load_sprite("hudclock"), (632 - (len(game_time) + 1) * 8, 32))
+            screen.blit(load_sprite("hudclock"), (630 - (len(game_time) + 1) * 8, 32))
 
         if players_hud:
             for player_hud in players_hud:
@@ -3178,7 +3319,7 @@ while running:
                         fade_in = exit_ready = True
                         bgm_player.fade_out()
                         sound_player.play_sound(coin_sound)
-            if game_over and dt >= get_game_property("gameover_time"):
+            if game_over and dt >= get_game_property("gameover_time") * 60 and not game_ready:
                 bgm_player.stop_music()
                 sound_player.stop_all_sounds()
                 sound_player.play_sound(coin_sound)
