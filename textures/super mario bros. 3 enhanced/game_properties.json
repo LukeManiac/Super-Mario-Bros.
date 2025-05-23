@@ -29,7 +29,8 @@
                     "swim": 4,
                     "swimpush": 2
                 },
-                "frame_speeds": {"dead": 1}
+                "frame_speeds": {"dead": 1},
+                "color": [255, 172, 0]
             },
             {
                 "frames": {
@@ -37,7 +38,8 @@
                     "swim": 4,
                     "swimpush": 2
                 },
-                "frame_speeds": {"dead": 1}
+                "frame_speeds": {"dead": 1},
+                "color": [0, 126, 255]
             }
         ]
     },
@@ -56,5 +58,10 @@
         "overworld_fast": 2907,
         "title": 5247
     },
+    "progress_bar_colors": [
+        [247, 57, 16],
+        [255, 172, 0],
+        [33, 173, 16]
+    ],
     "timer_speed": 0.6
 }
