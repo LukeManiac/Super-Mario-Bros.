@@ -284,6 +284,10 @@
             }
         }
     },
+    "flagpole": {
+        "frames": 1,
+        "speed": 1
+    },
     "gameover_time": 4,
     "lives": 3,
     "loop_points": {
@@ -295,5 +299,10 @@
     },
     "pitch_shot_sound": false,
     "pitch_stomp_sound": false,
+    "progress_bar_colors": [
+        [247, 57, 16],
+        [230, 158, 18],
+        [33, 173, 16]
+    ],
     "timer_speed": 0.4
 }
