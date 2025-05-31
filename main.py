@@ -43,10 +43,7 @@ def ceil(x):
     return i if x == i or x < 0 else i + 1
 
 def lerp_color(color1, color2, t):
-    return [
-        floor(color1[i] + (color2[i] - color1[i]) * t)
-        for i in range(3)
-    ]
+    return [floor(color1[i] + (color2[i] - color1[i]) * t) for i in range(3)]
 
 def load_local_file(file):
     return f"{main_directory}/{file}"
@@ -228,6 +225,10 @@ def create_course(data):
         globals()["invertvertical"] = data["invertvertical"]
         globals()["vertical"] = False
 
+    if key_exists(data, "inverthorizontal") and isinstance(data["inverthorizontal"], bool):
+        globals()["inverthorizontal"] = data["inverthorizontal"]
+        globals()["vertical"] = False
+
     globals()["tiles"] = tiles
 
     if key_exists(data, "spawnpositions") and isinstance(data["spawnpositions"], list):
@@ -235,7 +236,7 @@ def create_course(data):
         globals()["spawnposy"] = ((data["spawnpositions"][1] - 4) * 16) - 1
 
     for category, items in data.items():
-        if key_exists(("tiles", "castle", "background", "tileset", "flagpole", "underwater", "vertical", "invertvertical"), category):
+        if key_exists(("tiles", "castle", "background", "tileset", "flagpole", "underwater", "vertical", "invertvertical", "inverthorizontal"), category):
             continue
 
         object_list = []
@@ -262,13 +263,13 @@ def create_pipe(x, y, length=2, can_enter=False, new_zone=None, pipe_dir="up", c
         "up": lambda pid: pid,
         "down": lambda pid: pid + (4 if key_exists({1, 2}, pid) else 0),
         "left": lambda pid: pid + (pid == 3) * 8 + (pid == 4) * 4 + (pid == 1) * 11 + (pid == 2) * 7,
-        "right": lambda pid: pid + (pid == 3) * 8 + (pid == 4) * 4 + (pid == 1) * 9 + (pid == 2) * 5,
+        "right": lambda pid: pid + (pid == 3) * 8 + (pid == 4) * 4 + (pid == 1) * 9 + (pid == 2) * 5
     }
     coord_adjustments = {
         "up": lambda i, j: (x + i, y + j),
         "down": lambda i, j: (x + i, y - j),
         "left": lambda i, j: (x - j, y - i),
-        "right": lambda i, j: (x + j, y - i),
+        "right": lambda i, j: (x + j, y - i)
     }
 
     for i in range(2):
@@ -364,13 +365,13 @@ def reload_data():
     globals()["sprout_sound"] = load_sound("sprout")
     globals()["stomp_sound"] = load_sound("stomp")
     globals()["swim_sound"] = load_sound("swim")
+    globals()["lives"] = get_game_property("lives")
     globals()["MAX_RUN_TIMER"] = get_game_property("character_properties", "max_run_timer") * 10
     globals()["WALK_SPEED"] = get_game_property("character_properties", "walk_speed")
     globals()["RUN_SPEED"] = get_game_property("character_properties", "run_speed")
     globals()["characters_data"] = get_game_property("character_properties", "character_data")
     globals()["characters_name"] = [get_game_property("character_properties", "character_data", i, "name") for i in count_list_items(characters_data)]
     globals()["characters_color"] = [get_game_property("character_properties", "character_data", i, "color") for i in count_list_items(characters_data)]
-    globals()["lives"] = get_game_property("lives")
     globals()["camera"] = Camera(get_game_property("camera_smoothness"))
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 640, 400
@@ -414,15 +415,26 @@ class ProgressBar:
         self.height = 8
         self.bar_width = 100
         self.circle_radius = self.height / 2
+        try:
+            self.color_start, self.color_mid, self.color_end = get_game_property("progress_bar_colors")
+        except:
+            raise CustomError("GamePropertyError", "Invalid type for 'progress_bar_colors' in game_properties.json: expected array, got {type(get_game_property('progress_bar_colors')).__name__}.")
+        self.color = self.color_start
+        self.full_surf = pygame.Surface((self.bar_width + int(self.circle_radius * 2) + 2, self.height + int(self.circle_radius * 2) + 2), pygame.SRCALPHA)
+        self.offset_surf = pygame.Surface(self.full_surf.get_size(), pygame.SRCALPHA)
+        self.draw_left = self.circle_radius + 1
+        self.draw_top = self.circle_radius + 1
 
     def update(self):
         if vertical:
             self.playerdist = min(mean(*[player.rect.y + player.rect.height // 2 for player in players]), self.oldplayerdist)
         elif invertvertical:
             self.playerdist = max(mean(*[player.rect.y + player.rect.height // 2 for player in players]), self.oldplayerdist)
+        elif inverthorizontal:
+            self.playerdist = min(mean(*[player.rect.x + player.rect.width // 2 for player in players]), self.oldplayerdist)
         else:
             self.playerdist = max(mean(*[player.rect.x + player.rect.width // 2 for player in players]), self.oldplayerdist)
-        self.progress = floor(range_number((self.playerdist - spawnposx) / (flagpole.x - spawnposx), 0, 1) * 100) / 100
+        self.progress = range_number((self.playerdist - spawnposx) / (flagpole.x - spawnposx), 0, 1)
         if vertical:
             if self.playerdist <= self.oldplayerdist:
                 self.oldplayerdist = self.playerdist
@@ -430,62 +442,24 @@ class ProgressBar:
             if self.playerdist > self.oldplayerdist:
                 self.oldplayerdist = self.playerdist
 
-    def get_bar_color(self):
-        try:
-            color_start, color_mid, color_end = get_game_property("progress_bar_colors")
-        except:
-            raise CustomError("GamePropertyError", "Invalid type for 'progress_bar_colors' in game_properties.json: expected array, got {type(get_game_property('progress_bar_colors')).__name__}.")
-
-        if self.progress <= 0.5:
-            t = self.progress / 0.5
-            return lerp_color(color_start, color_mid, t)
-        else:
-            t = (self.progress - 0.5) / 0.5
-            return lerp_color(color_mid, color_end, t)
-
     def draw(self):
-        left = self.x - self.bar_width // 2
-        right = self.x + self.bar_width // 2
-        top = self.y + 12
-
-        color = self.get_bar_color()
-        radius = self.circle_radius
-        bar_full_width = self.bar_width + int(radius * 2) + 2
-        bar_full_height = self.height + int(radius * 2) + 2
-
-        full_surf = pygame.Surface((bar_full_width, bar_full_height), pygame.SRCALPHA)
-        draw_left = radius + 1
-        draw_top = radius + 1
-
-        outline_color = (0, 0, 0)
+        self.color = lerp_color(self.color_start, self.color_mid, self.progress / 0.5) if self.progress <= 0.5 else lerp_color(self.color_mid, self.color_end, (self.progress - 0.5) / 0.5)
 
         def draw_shapes(surf, c):
-            pygame.draw.circle(surf, c, (draw_left, draw_top + radius), radius)
-            pygame.draw.circle(surf, c, (draw_left + self.bar_width, draw_top + radius), radius)
-            pygame.draw.rect(surf, c, pygame.Rect(draw_left, draw_top, self.bar_width, self.height))
+            pygame.draw.circle(surf, c, (self.draw_left, self.draw_top + self.circle_radius), self.circle_radius)
+            pygame.draw.circle(surf, c, (self.draw_left + self.bar_width, self.draw_top + self.circle_radius), self.circle_radius)
+            pygame.draw.rect(surf, c, pygame.Rect(self.draw_left, self.draw_top, self.bar_width, self.height))
 
         if get_game_property("font_outline"):
             for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
-                offset_surf = pygame.Surface(full_surf.get_size(), pygame.SRCALPHA)
-                draw_shapes(offset_surf, outline_color)
-                full_surf.blit(offset_surf, (dx, dy))
+                draw_shapes(self.offset_surf, (0, 0, 0))
+                self.full_surf.blit(self.offset_surf, (dx, dy))
 
-        draw_shapes(full_surf, color)
+        draw_shapes(self.full_surf, self.color)
 
-        clip_width = int((self.bar_width + radius * 2) * self.progress)
-        clip_rect = pygame.Rect(0, 0, clip_width, full_surf.get_height())
+        screen.blit(self.full_surf.subsurface(pygame.Rect(0, 0, (self.bar_width + self.circle_radius * 2) * (self.progress * (1.02 if get_game_property("font_outline") else 1)), self.full_surf.get_height())), (self.x - self.bar_width // 2 - self.circle_radius - 1, self.y + 12 - self.circle_radius - 1))
 
-        screen.blit(full_surf.subsurface(clip_rect), (left - radius - 1, top - radius - 1))
-
-        text.create_text(
-            text=f"{int(self.progress * 100)}%",
-            position=(self.x, self.y),
-            alignment="center",
-            color=color,
-            stickxtocamera=True,
-            stickytocamera=True,
-            scale=0.5
-        )
+        text.create_text(text=f"{round(self.progress * 100)}%", position=(self.x, self.y), alignment="center", color=self.color, stickxtocamera=True, stickytocamera=True, scale=0.5)
 
 class Flagpole:
     def __init__(self, x, y, height=8):
@@ -558,16 +532,7 @@ class SFXPlayer:
         pitched_sound.play()
 
     def change_pitch(self, sound, semitones):
-        return sound if semitones == 0 else pygame.sndarray.make_sound(
-            pygame.sndarray.array(sound)[
-                numpy.round(
-                    numpy.linspace(
-                        0, len(pygame.sndarray.array(sound)) - 1,
-                        int(len(pygame.sndarray.array(sound)) / (2 ** (semitones / 12)))
-                    )
-                ).astype(int)
-            ]
-        )
+        return sound if semitones == 0 else pygame.sndarray.make_sound(pygame.sndarray.array(sound)[numpy.round(numpy.linspace(0, len(pygame.sndarray.array(sound)) - 1, int(len(pygame.sndarray.array(sound)) / (2 ** (semitones / 12))))).astype(int)])
 
     def stop_sound(self, sound):
         if key_exists(self.sounds, sound):
@@ -668,9 +633,7 @@ class Text:
 
             if get_game_property("font_outline"):
                 outline_size = scale * 2
-                outline_surface = pygame.Surface(
-                    (int(text_width + outline_size * 2), int(text_height + outline_size * 2)), pygame.SRCALPHA
-                )
+                outline_surface = pygame.Surface((int(text_width + outline_size * 2), int(text_height + outline_size * 2)), pygame.SRCALPHA)
 
                 temp_surface = self.font.render(line, True, (0, 0, 0))
                 temp_surface = pygame.transform.scale(temp_surface, (int(text_width), int(text_height)))
@@ -747,8 +710,8 @@ class Camera:
         self.smoothing = 1 if smoothing == 0 else smoothing
 
     def update(self, players, max_x=None, max_y=None):
-        self.x += (((mean(*[player.rect.x + player.rect.width // 2 for player in players])) - SCREEN_WIDTH // 2) - self.x) / self.smoothing
-        self.y += (((mean(*[player.rect.y + player.rect.height // 2 for player in players])) - SCREEN_HEIGHT // 2) - self.y) / self.smoothing
+        self.x += (((mean(*[player.rect.x + player.rect.width // 2 for player in players])) - centerx) - self.x) / self.smoothing
+        self.y += (((mean(*[player.rect.y + player.rect.height // 2 for player in players])) - centery) - self.y) / self.smoothing
         self.x = range_number(self.x, 0, max_x if max_x is not None else infinity)
         self.y = range_number(self.y, 0, max_y if max_y is not None else infinity)
 
@@ -898,30 +861,16 @@ class PlayerHUD:
 
             if self.star:
                 star_mask = sprite.copy()
-                colors = [
-                    (255, 0, 0),
-                    (255, 128, 0),
-                    (255, 255, 0),
-                    (128, 255, 0),
-                    (0, 255, 0),
-                    (0, 255, 128),
-                    (0, 255, 255),
-                    (0, 128, 255),
-                    (0, 0, 255),
-                    (128, 0, 255),
-                    (255, 0, 255),
-                    (255, 0, 128)
-                ]
                 cycle_time = 2 if self.star_timer >= 1 else 1
 
                 if pause or everyone_dead:
                     color_index = self.last_color_index if hasattr(self, "last_color_index") else 0
                 else:
                     self.time_passed = pygame.time.get_ticks()
-                    color_index = int((self.time_passed % (1250 / cycle_time)) / ((1250 / cycle_time) / len(colors)))
+                    color_index = int((self.time_passed % (1250 / cycle_time)) / ((1250 / cycle_time) / len(get_game_property("star_colors"))))
                     self.last_color_index = color_index
 
-                star_mask.fill(colors[color_index], special_flags=pygame.BLEND_RGBA_MULT)
+                star_mask.fill(get_game_property("star_colors", color_index), special_flags=pygame.BLEND_RGBA_MULT)
                 screen.blit(star_mask, (((self.sprite_size[0] // 2)) - 4, (((self.sprite_size[1] // len(characters_data))) + 4) + self.player_number * 16))
         except AttributeError:
             pass
@@ -966,11 +915,10 @@ class Tile:
         self.can_break_now = False
         self.hit = False
         self.item_spawned = False
-        self.item_sound = None if self.item == CoinAnimation or str(self.item) == "MultiCoin" else item_sound
+        self.item_sound = None if self.item == CoinAnimation or str(self.item) == "MultiCoin" else (item_sound or sprout_sound)
         self.player = None
         self.coin_block_timer = 0
         self.coins = 0
-        self.position = (self.x - camera.x, self.y - camera.y)
         self.image_scale = 1
         self.sprite = None
 
@@ -1071,7 +1019,7 @@ class HardBlock(Tile):
         super().__init__(x, y, "hardblock", spriteset)
 
 class AnimatedTile(Tile):
-    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False, breakable=False, item=None, item_spawn_anim=True, item_sound=sprout_sound, anim_speed=1):
+    def __init__(self, x, y, image, spriteset, left_collide=True, right_collide=True, top_collide=True, bottom_collide=True, bonk_bounce=False, breakable=False, item=None, item_spawn_anim=True, item_sound=None, anim_speed=1):
         super().__init__(x, y, image, spriteset, left_collide, right_collide, top_collide, bottom_collide, bonk_bounce, breakable, item, item_spawn_anim, item_sound)
 
         self.cols = self.img_width // self.tile_size
@@ -1090,21 +1038,21 @@ class AnimatedTile(Tile):
             self.sprite = None
 
 class Brick(AnimatedTile):
-    def __init__(self, x, y, item=None, item_spawn_anim=True, spriteset=1, item_sound=sprout_sound):
+    def __init__(self, x, y, item=None, item_spawn_anim=True, spriteset=1, item_sound=None):
         super().__init__(x, y, "brick", spriteset, bonk_bounce=True, breakable=True, item=item, item_spawn_anim=item_spawn_anim, item_sound=item_sound, anim_speed=get_game_property("animation_speed", "brick"))
 
     def update(self):
         super().update()
 
 class QuestionBlock(AnimatedTile):
-    def __init__(self, x, y, item=CoinAnimation, item_spawn_anim=True, spriteset=1, item_sound=sprout_sound):
+    def __init__(self, x, y, item=CoinAnimation, item_spawn_anim=True, spriteset=1, item_sound=None):
         super().__init__(x, y, "questionblock", spriteset, bonk_bounce=True, item=item, item_spawn_anim=False if item == CoinAnimation else item_spawn_anim, item_sound=item_sound, anim_speed=get_game_property("animation_speed", "? block"))
 
     def update(self):
         super().update()
 
 class HiddenBlock(AnimatedTile):
-    def __init__(self, x, y, item=CoinAnimation, item_spawn_anim=True, spriteset=1, item_sound=sprout_sound):
+    def __init__(self, x, y, item=CoinAnimation, item_spawn_anim=True, spriteset=1, item_sound=None):
         super().__init__(x, y, None, spriteset, bonk_bounce=True, item=item, item_spawn_anim=False if item == CoinAnimation else item_spawn_anim, item_sound=item_sound, left_collide=False, right_collide=False, top_collide=False)
 
     def update(self):
@@ -1143,7 +1091,7 @@ class BrickDebris:
         self.angle -= self.speedx * 4
         self.quad = self.image.subsurface(self.sprites[self.spriteset][self.sprite])
         self.rotated_image = pygame.transform.rotate(self.image.subsurface(self.sprites[self.spriteset][self.sprite]), self.angle)
-        if self.y >= SCREEN_HEIGHT + 16:
+        if self.y >= (y_range or SCREEN_HEIGHT) + 16:
             debris.remove(self)
     
     def draw(self):
@@ -1217,12 +1165,7 @@ class Mushroom:
             self.rect.topleft = (self.x, self.y)
 
     def is_visible(self):
-        return (
-            ((self.x > camera.x - self.rect.width and self.x < camera.x + SCREEN_WIDTH + self.rect.width) or
-            (self.x + self.rect.width > camera.x - self.rect.width and self.x + self.rect.width < camera.x + SCREEN_WIDTH + self.rect.width)) and
-            ((self.y > camera.y - self.rect.height and self.y < camera.y + SCREEN_HEIGHT + self.rect.height) or
-            (self.y + self.rect.height > camera.y - self.rect.height and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
-        )
+        return (((self.x > camera.x - self.rect.width and self.x < camera.x + SCREEN_WIDTH + self.rect.width) or (self.x + self.rect.width > camera.x - self.rect.width and self.x + self.rect.width < camera.x + SCREEN_WIDTH + self.rect.width)) and ((self.y > camera.y - self.rect.height and self.y < camera.y + SCREEN_HEIGHT + self.rect.height) or (self.y + self.rect.height > camera.y - self.rect.height and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height)))
     
     def below_camera(self):
         return nor((self.y < camera.y + SCREEN_HEIGHT + self.rect.height), (self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
@@ -1304,12 +1247,7 @@ class FireFlower:
                     break
 
     def is_visible(self):
-        return (
-            ((self.x > camera.x - self.rect.width and self.x < camera.x + SCREEN_WIDTH + self.rect.width) or
-            (self.x + self.rect.width > camera.x - self.rect.width and self.x + self.rect.width < camera.x + SCREEN_WIDTH + self.rect.width)) and
-            ((self.y > camera.y - self.rect.height and self.y < camera.y + SCREEN_HEIGHT + self.rect.height) or
-            (self.y + self.rect.height > camera.y - self.rect.height and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
-        )
+        return (((self.x > camera.x - self.rect.width and self.x < camera.x + SCREEN_WIDTH + self.rect.width) or (self.x + self.rect.width > camera.x - self.rect.width and self.x + self.rect.width < camera.x + SCREEN_WIDTH + self.rect.width)) and ((self.y > camera.y - self.rect.height and self.y < camera.y + SCREEN_HEIGHT + self.rect.height) or (self.y + self.rect.height > camera.y - self.rect.height and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height)))
     
     def below_camera(self):
         return nor((self.y < camera.y + SCREEN_HEIGHT + self.rect.height), (self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
@@ -1385,12 +1323,7 @@ class Star:
             self.rect.topleft = (self.x, self.y)
 
     def is_visible(self):
-        return (
-            ((self.x > camera.x - self.rect.width and self.x < camera.x + SCREEN_WIDTH + self.rect.width) or
-            (self.x + self.rect.width > camera.x - self.rect.width and self.x + self.rect.width < camera.x + SCREEN_WIDTH + self.rect.width)) and
-            ((self.y > camera.y - self.rect.height and self.y < camera.y + SCREEN_HEIGHT + self.rect.height) or
-            (self.y + self.rect.height > camera.y - self.rect.height and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
-        )
+        return (((self.x > camera.x - self.rect.width and self.x < camera.x + SCREEN_WIDTH + self.rect.width) or (self.x + self.rect.width > camera.x - self.rect.width and self.x + self.rect.width < camera.x + SCREEN_WIDTH + self.rect.width)) and ((self.y > camera.y - self.rect.height and self.y < camera.y + SCREEN_HEIGHT + self.rect.height) or (self.y + self.rect.height > camera.y - self.rect.height and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height)))
     
     def below_camera(self):
         return nor((self.y < camera.y + SCREEN_HEIGHT + self.rect.height), (self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
@@ -1482,12 +1415,7 @@ class Fireball:
         sound_player.play_sound(bump_sound)
 
     def is_visible(self):
-        return (
-            ((self.x > camera.x - self.rect.width and self.x < camera.x + SCREEN_WIDTH + self.rect.width) or
-            (self.x + self.rect.width > camera.x - self.rect.width and self.x + self.rect.width < camera.x + SCREEN_WIDTH + self.rect.width)) and
-            ((self.y > camera.y - self.rect.height and self.y < camera.y + SCREEN_HEIGHT + self.rect.height) or
-            (self.y + self.rect.height > camera.y - self.rect.height and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
-        )
+        return (((self.x > camera.x - self.rect.width and self.x < camera.x + SCREEN_WIDTH + self.rect.width) or (self.x + self.rect.width > camera.x - self.rect.width and self.x + self.rect.width < camera.x + SCREEN_WIDTH + self.rect.width)) and ((self.y > camera.y - self.rect.height and self.y < camera.y + SCREEN_HEIGHT + self.rect.height) or (self.y + self.rect.height > camera.y - self.rect.height and self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height)))
 
     def draw(self):
         if self.dt > 1:
@@ -1607,12 +1535,7 @@ class Goomba:
                     self.speedx = -2
 
     def is_visible(self):
-        return (
-            ((self.x > camera.x - self.rect.width and self.x < camera.x + SCREEN_WIDTH + self.rect.width) or
-            (self.x + self.rect.width > camera.x - self.rect.width and self.x + self.rect.width < camera.x + SCREEN_WIDTH + self.rect.width)) and
-            ((self.y > camera.y - self.rect.height) or
-            (self.y + self.rect.height > camera.y - self.rect.height))
-        )
+        return (((self.x > camera.x - self.rect.width and self.x < camera.x + SCREEN_WIDTH + self.rect.width) or (self.x + self.rect.width > camera.x - self.rect.width and self.x + self.rect.width < camera.x + SCREEN_WIDTH + self.rect.width)) and ((self.y > camera.y - self.rect.height) or (self.y + self.rect.height > camera.y - self.rect.height)))
     
     def below_camera(self):
         return nor((self.y < camera.y + SCREEN_HEIGHT + self.rect.height), (self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
@@ -1757,12 +1680,7 @@ class Koopa:
                     self.speedx = -2
 
     def is_visible(self):
-        return (
-            ((self.x > camera.x - self.rect.width and self.x < camera.x + SCREEN_WIDTH + self.rect.width) or
-            (self.x + self.rect.width > camera.x - self.rect.width and self.x + self.rect.width < camera.x + SCREEN_WIDTH + self.rect.width)) and
-            ((self.y > camera.y - self.rect.height) or
-            (self.y + self.rect.height > camera.y - self.rect.height))
-        )
+        return (((self.x > camera.x - self.rect.width and self.x < camera.x + SCREEN_WIDTH + self.rect.width) or (self.x + self.rect.width > camera.x - self.rect.width and self.x + self.rect.width < camera.x + SCREEN_WIDTH + self.rect.width)) and ((self.y > camera.y - self.rect.height) or (self.y + self.rect.height > camera.y - self.rect.height)))
     
     def below_camera(self):
         return nor((self.y < camera.y + SCREEN_HEIGHT + self.rect.height), (self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
@@ -1949,7 +1867,7 @@ class Player:
                     self.shrunk = True
                     self.respawning = True
         else:
-            self.gravity = 0.125 if underwater else 0.25
+            self.gravity = 0.125 if underwater and not self.dead else 0.25
             self.left = (keys[self.controls["left"]]) if self.controls_enabled and self.can_control and not self.piping else False
             self.right = (keys[self.controls["right"]]) if self.controls_enabled and self.can_control and not self.piping else False
             self.up = (keys[self.controls["up"]]) if self.controls_enabled and self.can_control and not self.piping else False
@@ -2092,7 +2010,7 @@ class Player:
             if underwater:
                 if self.jump and self.jump_timer == 0:
                     self.down = False
-                    self.speedy = -self.swim_height * (1.25 if self.up and not self.down else 0.8 if self.down and not self.up else 1)
+                    self.speedy = -self.swim_height * (1.5 if self.up and not self.down_key else 0.75 if self.down_key and not self.up else 1)
                     self.jump_timer = 1
                     self.fall_timer = self.fall_duration
                     self.swim_push_anim = True
@@ -2142,11 +2060,6 @@ class Player:
                 self.rect.right = camera.x + SCREEN_WIDTH
                 if self.rect.x >= camera.x + SCREEN_WIDTH - self.rect.width and ((self.speedx > 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)):
                     self.speedx = 0
-
-            if self.rect.top < camera.y:
-                self.rect.top = camera.y
-                self.speedy = 0
-                self.jump_timer = 0
 
             new_rect = self.rect.copy()
             new_rect.x += self.speedx
@@ -2369,9 +2282,7 @@ class Player:
                 self.star_timer = 0
                 self.star = False
 
-            self.rect.y = max(self.rect.y, camera.y)
-
-            if self.rect.top >= SCREEN_HEIGHT + self.rect.height + 16:
+            if self.rect.top >= (y_range or SCREEN_HEIGHT):
                 self.dead = True
                 self.dead_speed = 0
 
@@ -2453,20 +2364,6 @@ class Player:
 
             if self.star:
                 star_mask = sprite.copy()
-                colors = [
-                    (255, 0, 0),
-                    (255, 128, 0),
-                    (255, 255, 0),
-                    (128, 255, 0),
-                    (0, 255, 0),
-                    (0, 255, 128),
-                    (0, 255, 255),
-                    (0, 128, 255),
-                    (0, 0, 255),
-                    (128, 0, 255),
-                    (255, 0, 255),
-                    (255, 0, 128)
-                ]
                 cycle_time = 2 if self.star_timer >= 1 else 1
                 cycle_speed = 1.25
 
@@ -2474,10 +2371,10 @@ class Player:
                     color_index = self.last_color_index if hasattr(self, "last_color_index") else 0
                 else:
                     self.time_passed = pygame.time.get_ticks()
-                    color_index = int((self.time_passed % ((cycle_speed * 1000) / cycle_time)) / (((cycle_speed * 1000) / cycle_time) / len(colors)))
+                    color_index = int((self.time_passed % ((cycle_speed * 1000) / cycle_time)) / (((cycle_speed * 1000) / cycle_time) / len(get_game_property("star_colors"))))
                     self.last_color_index = color_index
 
-                star_mask.fill(colors[color_index], special_flags=pygame.BLEND_RGBA_MULT)
+                star_mask.fill(get_game_property("star_colors", color_index), special_flags=pygame.BLEND_RGBA_MULT)
                 screen.blit(star_mask, (draw_x, draw_y))
 
                 if self.star_trail_timer >= self.star_trail_duration * 60 and nor(self.piping, self.dead):
@@ -2652,6 +2549,7 @@ fade_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
 a = 255
 vertical = False
 invertvertical = False
+inverthorizontal = False
 fade_in = False
 fade_out = False
 
@@ -3050,7 +2948,7 @@ while running:
         background_manager.draw()
 
         try:
-            if nor(any(player.piping for player in players), everyone_dead, pause, fade_in, fade_out):
+            if nor(any(player.piping for player in players), everyone_dead, pause):
                 camera.update([player for player in players if not player.dead], x_range, y_range - 400)
         except ZeroDivisionError:
             pass
@@ -3062,11 +2960,6 @@ while running:
             flagpole.draw()
             if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
                 flagpole.update()
-
-        for power_meter in power_meters:
-            power_meter.draw()
-            if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
-                power_meter.update()
 
         for item in items[:]:
             if item.is_visible():
@@ -3131,6 +3024,11 @@ while running:
                     player.draw()
                 if not pause:
                     player.update()
+
+        for power_meter in power_meters:
+            power_meter.draw()
+            if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
+                power_meter.update()
 
         for enemy in enemies[:]:
             if enemy.is_visible():
@@ -3212,6 +3110,7 @@ while running:
                 text=f"x{format_number(hud.coins, 2)}",
                 position=(20 + hud.image.get_width(), 16),
                 stickxtocamera=True,
+                stickytocamera=True,
                 scale=0.5
             )
 
@@ -3220,6 +3119,7 @@ while running:
                 position=(632, 16),
                 alignment="right",
                 stickxtocamera=True,
+                stickytocamera=True,
                 scale=0.5
             )
 
@@ -3228,6 +3128,7 @@ while running:
                 position=(632, 32),
                 alignment="right",
                 stickxtocamera=True,
+                stickytocamera=True,
                 scale=0.5
             )
 
@@ -3280,13 +3181,13 @@ while running:
         dt += 1
         text.create_text(
             text="GAME OVER",
-            position=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2),
+            position=(centerx, centery),
             alignment="center"
         )
         if dt >= get_game_property("gameover_time") * 60:
             text.create_text(
                 text="PRESS ANY KEY TO RESTART",
-                position=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 1.75),
+                position=(centerx, SCREEN_HEIGHT // 1.75),
                 alignment="center",
                 scale=0.5
             )
@@ -3359,7 +3260,7 @@ while running:
                 if binding_key:
                     sound_player.play_sound(shrink_sound if key == pygame.K_ESCAPE else powerup_sound)
                     if not key == pygame.K_ESCAPE:
-                        controls_table[menu_area - 4][bind_table[selected_menu_index]] = key
+                        controls_table[menu_area - 5][bind_table[selected_menu_index]] = key
                     binding_key = current_bind = False
                     sound_player.stop_sound(sprout_sound)
                 else:
