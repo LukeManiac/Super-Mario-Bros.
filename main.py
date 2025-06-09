@@ -1,5 +1,5 @@
 import pygame, json, numpy, psutil, sys
-from os.path import dirname, abspath, exists, getsize, isdir
+from os.path import dirname, abspath, exists, getsize, isdir, splitext, basename
 from os import listdir, makedirs
 from datetime import datetime
 
@@ -14,6 +14,31 @@ pygame.mixer.init()
 infinity = float("inf")
 pi = 3.141592653589793
 main_directory = dirname(sys.executable if getattr(sys, "frozen", False) else abspath(__file__))
+
+def radians(deg):
+    return deg * (pi / 180)
+
+def sin(x):
+    x = x % (2 * pi)
+    if x > pi:
+        x -= 2 * pi
+
+    term = x
+    result = 0
+    n = 0
+
+    while abs(term) > 1e-15:
+        result += term
+        n += 1
+        term *= -x * x / ((2 * n) * (2 * n + 1))
+
+    return result
+
+def floor(x):
+    return int(x) if x >= 0 or x == int(x) else int(x) - 1
+
+def ceil(x):
+    return int(x) if x == int(x) or x < 0 else int(x) + 1
 
 def set_image_alpha(image, alpha=1):
     try:
@@ -33,14 +58,6 @@ def mean(*numbers):
         return sum(numbers) / len(numbers)
     except:
         return 0
-
-def floor(x):
-    i = int(x)
-    return i if x >= 0 or x == i else i - 1
-
-def ceil(x):
-    i = int(x)
-    return i if x == i or x < 0 else i + 1
 
 def lerp(a, b, t):
     return a + (b - a) * t
@@ -165,8 +182,11 @@ def nor(*conditions):
 def xor(a, b):
     return (a or b) and not (a and b)
 
-def create_course(data):
+def create_course(file):
+    data = load_json(file)
+
     pygame.display.update()
+
     default_music = {
         "main_music": data["music"] if key_exists(data, "music") else "overworld",
         "clear_music": f"{main_music}_clear" if exists(f"{main_music}_clear") else "clear",
@@ -181,7 +201,8 @@ def create_course(data):
     globals()["background"] = data["background"] if key_exists(data, "background") and isinstance(data["background"], str) else "ground"
     globals()["y_range"] = (data["height"] if key_exists(data, "height") and isinstance(data["height"], int) else 25) * 16
     globals()["time"] = 100 if nitpicks["hurry_mode"] else (data["timelimit"] if key_exists(data, "timelimit") and isinstance(data["timelimit"], int) else 400)
-    globals()["course_time"] = 100 if nitpicks["hurry_mode"] else (data["timelimit"] if key_exists(data, "timelimit") and isinstance(data["timelimit"], int) else 400)
+    globals()["course_time"] = globals()["time"]
+    globals()["course_name"] = data["course_name"] if key_exists(data, "course_name") else splitext(basename(file))[0]
     
     tiles = []
     if key_exists(data, "tiles") and isinstance(data["tiles"], dict):
@@ -238,7 +259,7 @@ def create_course(data):
         globals()["spawnposy"] = ((data["spawnpositions"][1] - 4) * 16) - 1
 
     for category, items in data.items():
-        if key_exists(("tiles", "castle", "background", "tileset", "flagpole", "underwater", "vertical", "invertvertical", "inverthorizontal"), category):
+        if key_exists(("tiles", "castle", "background", "tileset", "underwater", "vertical", "invertvertical", "inverthorizontal", "flagpole"), category):
             continue
 
         object_list = []
@@ -1336,7 +1357,7 @@ class Star:
 
 class Fireball:
     def __init__(self, player):
-        self.x = player.rect.left - 5
+        self.x = player.rect.centerx - 8
         self.y = player.rect.top
         self.bounce = pi
         self.speedx = RUN_SPEED * (1.25 if player.facing_right else -1.25)
@@ -2326,11 +2347,11 @@ class Player:
         if self.dead:
             self.frame_timer += 1 if self.dead_timer >= 30 and not self.death_anim else 0
             self.anim_state = self.frame_data["runfall"] + ((int(self.frame_timer * self.frame_speeds["dead"]) % self.frame_group["dead"]) if self.frame_loops["dead"] else min(int(self.frame_timer * self.frame_speeds["dead"]), self.frame_group["dead"] - 1))
-        elif self.down:
-            self.anim_state = self.frame_data["crouch" if self.falling_condition else "idle"] + ((int(((self.crouch_fall_timer if self.falling_condition else self.crouch_timer) if self.sync_crouch else self.crouch_timer) * self.frame_speeds["crouchfall" if self.falling_condition else "crouch"]) % self.frame_group["crouchfall" if self.falling_condition else "crouch"]) if self.frame_loops["crouchfall" if self.falling_condition else "crouch"] else min(int(((self.crouch_fall_timer if self.falling_condition else self.crouch_timer) if self.sync_crouch else self.crouch_timer) * self.frame_speeds["crouchfall" if self.falling_condition else "crouch"]), self.frame_group["crouchfall" if self.falling_condition else "crouch"] - 1))
-            self.frame_timer = 0
         elif self.size == 2 and 0 < self.fire_timer < self.fire_duration and not self.fire_lock:
             self.anim_state = self.frame_data["swimpush"] + int((self.fire_timer * self.frame_group["fire"]) / self.fire_duration)
+            self.frame_timer = 0
+        elif self.down:
+            self.anim_state = self.frame_data["crouch" if self.falling_condition else "idle"] + ((int(((self.crouch_fall_timer if self.falling_condition else self.crouch_timer) if self.sync_crouch else self.crouch_timer) * self.frame_speeds["crouchfall" if self.falling_condition else "crouch"]) % self.frame_group["crouchfall" if self.falling_condition else "crouch"]) if self.frame_loops["crouchfall" if self.falling_condition else "crouch"] else min(int(((self.crouch_fall_timer if self.falling_condition else self.crouch_timer) if self.sync_crouch else self.crouch_timer) * self.frame_speeds["crouchfall" if self.falling_condition else "crouch"]), self.frame_group["crouchfall" if self.falling_condition else "crouch"] - 1))
             self.frame_timer = 0
         elif self.skidding:
             self.anim_state = self.frame_data["walk"] + ((int(self.skid_timer * self.frame_speeds["skid"]) % self.frame_group["skid"]) if self.frame_loops["skid"] else min(int(self.skid_timer * self.frame_speeds["skid"]), self.frame_group["skid"] - 1))
@@ -2481,7 +2502,8 @@ nitpicks_list = [
     "show_time",
     "play_music_in_pause",
     "non-progressive_powerups",
-    "always_underwater"
+    "always_underwater",
+    "hide_course_name"
 ]
 
 if exists(load_local_file("nitpicks.json")):
@@ -2534,7 +2556,9 @@ course = 0
 lives = get_game_property("lives")
 score = 0
 time = 0
+game_time = 0
 pipe_wait_timer = 0
+course_name = None
 progress_bar = None
 castle = None
 flagpole = None
@@ -2678,7 +2702,7 @@ while running:
                     course = 1
                     world += 1
                 initialize_game()                
-                create_course(load_json(f"courses/{course_directory}/{world}-{course}"))
+                create_course(f"courses/{course_directory}/{world}-{course}")
                 camera.x = 0
                 camera.y = 0
                 if time > 100:
@@ -2691,7 +2715,7 @@ while running:
                     players_hud.append(PlayerHUD(players[i]))
             elif reset_ready:
                 initialize_game()
-                create_course(load_json(f"courses/{course_directory}/{world}-{course}"))
+                create_course(f"courses/{course_directory}/{world}-{course}")
                 camera.x = 0
                 camera.y = 0
                 if time > 100:
@@ -2715,7 +2739,7 @@ while running:
                     pipe_wait_timer = 0
                 else:
                     initialize_game()
-                    create_course(load_json(f"courses/{course_directory}/{world}-{course}"))
+                    create_course(f"courses/{course_directory}/{world}-{course}")
                     camera.x = 0
                     camera.y = 0
                     if time > 100:
@@ -3141,6 +3165,18 @@ while running:
             )
 
             screen.blit(load_sprite("hudclock"), (630 - (len(game_time) + 1) * 8, 32))
+
+            if 0 <= game_dt <= 60 or 180 <= game_dt <= 240:
+                course_name_y = SCREEN_HEIGHT - (12 * (sin(radians((game_dt - 30) * 3)) + 1))
+            
+            if not nitpicks["hide_course_name"]:
+                text.create_text(
+                    text=course_name,
+                    position=(centerx, course_name_y),
+                    alignment="center",
+                    stickxtocamera=True,
+                    stickytocamera=True
+                )
 
         if players_hud:
             for player_hud in players_hud:
