@@ -19,7 +19,7 @@ def set_image_alpha(image, alpha=1):
     try:
         alpha = float(alpha)
         if not (0 <= alpha <= 1):
-            raise ValueError
+            raise ValueError(f"Expected value between 0 and 1, got {alpha}.")
     except:
         alpha = 1
 
@@ -42,25 +42,28 @@ def ceil(x):
     i = int(x)
     return i if x == i or x < 0 else i + 1
 
+def lerp(a, b, t):
+    return a + (b - a) * t
+
 def lerp_color(color1, color2, t):
     return [floor(color1[i] + (color2[i] - color1[i]) * t) for i in range(3)]
 
 def load_local_file(file):
     return f"{main_directory}/{file}"
 
-def load_json(path, *keys):
-    with open(load_local_file(f"{path}.json")) as file:
-        json_file = json.load(file)
+def load_json(path, *keys, default=None):
+    try:
+        with open(load_local_file(f"{path}.json"), "r", encoding="utf-8") as file:
+            json_file = json.load(file)
 
-    for key in keys:
-        json_file = json_file[key]
-
-    return json_file
-
-asset_directory = "assets"
+        for key in keys:
+            json_file = json_file[key]
+        return json_file
+    except (KeyError, TypeError, FileNotFoundError, json.JSONDecodeError):
+        return default
 
 try:
-    asset_directory = load_json("settings", "asset_directory")
+    asset_directory = load_json("settings", "asset_directory", default="assets")
 
     if not isdir(load_local_file(asset_directory)):
         asset_directory = "assets"
@@ -72,9 +75,8 @@ except:
 
 old_asset_directory = asset_directory
 
-course_directory = "classic"
 try:
-    course_directory = load_json("settings", "course_directory")
+    course_directory = load_json("settings", "course_directory", default="classic")
 
     if not isdir(load_local_file(course_directory)):
         course_directory = "classic"
@@ -381,7 +383,8 @@ WALK_SPEED = get_game_property("character_properties", "walk_speed")
 RUN_SPEED = get_game_property("character_properties", "run_speed")
 JUMP_HOLD_TIME = 10
 MIN_SPEEDX = 0.25
-FPS = 60
+FPS = load_json("settings", "fps", default=60)
+OLD_FPS = FPS
 FADE_DURATION = 30
 SPROUT_SPEED = 0.9125
 
@@ -1832,6 +1835,7 @@ class Player:
     def update(self):
         if self.dead:
             if self.dead_timer == 0:
+                self.gravity = 0.25
                 self.speedx = 0
                 self.frame_timer = 0
                 self.piping = False
@@ -1851,10 +1855,10 @@ class Player:
             self.dead_timer += 1
             if self.dead_timer >= 30:
                 if not self.dead_music:
-                    self.speedy = self.dead_speed
+                    self.speedy = -5
                     if self.all_dead:
                         bgm_player.play_music(dead_music)
-                self.speedy += self.gravity / 2
+                self.speedy += self.gravity
                 self.rect.y += self.speedy
                 self.dead_music = True
                 if self.dead_timer >= 150 and self.lives > 0 and not everyone_dead:
@@ -1867,7 +1871,7 @@ class Player:
                     self.shrunk = True
                     self.respawning = True
         else:
-            self.gravity = 0.125 if underwater and not self.dead else 0.25
+            self.gravity = 0.125 if underwater else 0.25
             self.left = (keys[self.controls["left"]]) if self.controls_enabled and self.can_control and not self.piping else False
             self.right = (keys[self.controls["right"]]) if self.controls_enabled and self.can_control and not self.piping else False
             self.up = (keys[self.controls["up"]]) if self.controls_enabled and self.can_control and not self.piping else False
@@ -1953,7 +1957,7 @@ class Player:
                     self.anim_state = self.frame_data["crouchfall"] + ((int(self.frame_timer * self.frame_speeds["walk"]) % self.frame_group["walk"]) if self.frame_loops["walk"] else min(int(self.frame_timer * self.frame_speeds["walk"]), self.frame_group["walk"] - 1))
                 return
 
-            self.speed = WALK_SPEED if underwater else ((RUN_SPEED * (1.25 if self.pspeed else 1) if self.run else WALK_SPEED) * (1.25 if self.star else 1))
+            self.speed = lerp(self.speed, WALK_SPEED if underwater else ((RUN_SPEED * (1.25 if self.pspeed else 1) if self.run else WALK_SPEED) * (1.25 if self.star else 1)), 0.125)
 
             self.run_lock = self.run and not self.prev_run
             self.jump_lock = self.jump and not self.prev_jump
@@ -1987,7 +1991,7 @@ class Player:
                     self.speedx *= (1 - self.acceleration)
                 else:
                     if self.left and not self.right:
-                        self.speedx = max(self.speedx - self.acceleration, -self.speed / (1.625 if underwater else 1))
+                        self.speedx = max(self.speedx - self.acceleration, -(self.speed + self.acceleration) / (1.625 if underwater else 1))
                         self.facing_right = False
                     elif self.right and not self.left:
                         self.speedx = min(self.speedx + self.acceleration, self.speed / (1.625 if underwater else 1))
@@ -1999,13 +2003,16 @@ class Player:
                                 self.speedx = 0
             else:
                 if self.left and not self.right:
-                    self.speedx = max(self.speedx - self.acceleration, -self.speed)
+                    self.speedx = max(self.speedx - self.acceleration, -(self.speed + self.acceleration))
                     if self.midair_turn or underwater:
                         self.facing_right = False
                 elif self.right and not self.left:
                     self.speedx = min(self.speedx + self.acceleration, self.speed)
                     if self.midair_turn or underwater:
                         self.facing_right = True
+
+            if not self.run and self.speedx > WALK_SPEED:
+                self.speedx = max(self.speedx - self.acceleration, WALK_SPEED)
 
             if underwater:
                 if self.jump and self.jump_timer == 0:
@@ -2044,7 +2051,7 @@ class Player:
 
             if self.can_control:
                 if self.fall_timer < self.fall_duration and self.controls_enabled:
-                    if abs(self.speedx) >= RUN_SPEED:
+                    if ceil(abs(self.speedx) * 1000) / 1000 >= RUN_SPEED:
                         self.run_timer = range_number(self.run_timer + (3 if self.star else 1), MIN_RUN_TIMER, MAX_RUN_TIMER)
                     else:
                         self.run_timer = range_number(self.run_timer - (3 if self.star else 0.5), MIN_RUN_TIMER, MAX_RUN_TIMER)
@@ -2190,7 +2197,6 @@ class Player:
                                             self.fall_timer = self.fall_duration
                                         elif not self.shrunk:
                                             if self.size == 0:
-                                                self.dead_speed = -5
                                                 self.dead = True
                                             else:
                                                 self.shrunk = True
@@ -2211,7 +2217,6 @@ class Player:
                                     else:
                                         if self.kicked_timer == 0 and not self.shrunk:
                                             if self.size == 0:
-                                                self.dead_speed = -5
                                                 self.dead = True
                                             else:
                                                 self.shrunk = True
@@ -2244,7 +2249,6 @@ class Player:
 
                         elif not self.shrunk:
                             if self.size == 0:
-                                self.dead_speed = -5
                                 self.dead = True
                             else:
                                 self.shrunk = True
@@ -2284,7 +2288,7 @@ class Player:
 
             if self.rect.top >= (y_range or SCREEN_HEIGHT):
                 self.dead = True
-                self.dead_speed = 0
+                self.rect.y = y_range + 80
 
             self.skidding = (self.fall_timer < self.fall_duration and ((self.speedx < 0 and self.facing_right and self.right and not self.left) or (self.speedx > 0 and not self.facing_right and self.left and not self.right)) and nor(self.down, 0 <= self.anim_state <= self.frame_data["idle"], abs(self.speedx) < MIN_SPEEDX))
 
@@ -2615,7 +2619,8 @@ while running:
     players_controls = range_number(players_controls, 1, len(characters_data))
     selected_course_pack = range_number(selected_course_pack, 0 if len(get_folders("courses")) == 0 else 1, len(get_folders("courses")))
     selected_texture = range_number(selected_texture, 0 if len(get_folders("textures")) == 0 else 1, len(get_folders("textures")))
-    if nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_players_ready == players_ready, old_players_controls == players_controls, old_selected_texture == selected_texture, old_selected_course_pack == selected_course_pack):
+    FPS = range_number(FPS, 1, 120)
+    if nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_players_ready == players_ready, old_players_controls == players_controls, old_selected_texture == selected_texture, old_selected_course_pack == selected_course_pack, OLD_FPS == FPS):
         sound_player.play_sound(beep_sound)
     old_mus_vol = mus_vol
     old_snd_vol = snd_vol
@@ -2623,6 +2628,7 @@ while running:
     old_players_controls = players_controls
     old_selected_course_pack = selected_course_pack
     old_selected_texture = selected_texture
+    OLD_FPS = FPS
 
     with open(load_local_file("settings.json"), "w") as settings:
         json.dump(
@@ -2631,6 +2637,7 @@ while running:
                 "snd_vol": snd_vol,
                 **{f"controls{'' if i == 0 else i+1}": controls_table[i] for i in count_list_items(characters_data)},
                 "fullscreen": fullscreen,
+                "fps": FPS,
                 "asset_directory": asset_directory,
                 "course_directory": course_directory
             }, settings, indent=4)
@@ -2740,7 +2747,8 @@ while running:
                 [f"sound volume: {int(snd_vol * 100)}%", 1],
                 ["set course pack", 1.125],
                 ["load texture", 1.25],
-                ["back", 1.375]
+                [f"set fps: {FPS}", 1.375],
+                ["back", 1.5]
             ],
         ]
 
@@ -3153,11 +3161,12 @@ while running:
         (sound_player.loop_sound if any(player.skidding for player in players) and nor(everyone_dead, pause, any(player.piping for player in players)) else sound_player.stop_sound)(skid_sound)
 
         pause_menu_options = [
-            ["resume", 0.75],
-            ["restart", 0.875],
-            [f"music volume: {int(mus_vol * 100)}%", 1],
-            [f"sound volume: {int(snd_vol * 100)}%", 1.125],
-            ["quit", 1.25]
+            ["resume", 0.8125],
+            ["restart", 0.9375],
+            [f"music volume: {int(mus_vol * 100)}%", 1.0625],
+            [f"sound volume: {int(snd_vol * 100)}%", 1.1875],
+            [f"fps: {int(FPS)}", 1.3125],
+            ["quit", 1.4375]
         ]
 
         if pause:
@@ -3235,6 +3244,8 @@ while running:
                         mus_vol += change
                     elif pause_menu_index == 3:
                         snd_vol += change
+                    elif pause_menu_index == 4:
+                        FPS += 1 if key == controls["right"] else -1
                 elif key == controls["jump"]:
                     if pause_menu_index == 0:
                         pause = False
@@ -3244,7 +3255,7 @@ while running:
                         fade_in = reset_ready = True
                         bgm_player.fade_out()
                         sound_player.play_sound(coin_sound)
-                    elif pause_menu_index == 4:
+                    elif pause_menu_index == 5:
                         fade_in = exit_ready = True
                         bgm_player.fade_out()
                         sound_player.play_sound(coin_sound)
@@ -3279,6 +3290,8 @@ while running:
                                 mus_vol += change
                             elif selected_menu_index == 2:
                                 snd_vol += change
+                            elif selected_menu_index == 5:
+                                FPS += 1 if key == controls["right"] else -1
                         elif menu_options == title_screen[2] and selected_menu_index == 1 and len(textures) >= 1:
                             selected_texture += 1 if key == controls["right"] else -1
                         elif menu_options == title_screen[3] and selected_menu_index == 1 and len(courses) >= 1:
@@ -3308,14 +3321,14 @@ while running:
                                 player_count = players_ready
                                 player_lives, player_sizes = [lives] * player_count, [0] * player_count
                         elif menu_options == title_screen[1]:
-                            if selected_menu_index in (0, 3, 4, 5):
+                            if selected_menu_index in (0, 3, 4, 6):
                                 if selected_menu_index == 0:
                                     menu_area = players_controls + 4
                                 elif selected_menu_index == 3:
                                     menu_area = 4
                                 elif selected_menu_index == 4:
                                     menu_area = 3
-                                elif selected_menu_index == 5:
+                                elif selected_menu_index == 6:
                                     menu_area = 1
                                 selected_menu_index = old_selected_menu_index = 0
                                 players_controls = old_players_controls = 1
@@ -3374,6 +3387,7 @@ with open(load_local_file("settings.json"), "w") as settings:
             "mus_vol": mus_vol,
             "snd_vol": snd_vol,
             **{f"controls{'' if i == 0 else i+1}": controls_table[i] for i in count_list_items(controls_table)},
+            "fps": FPS,
             "fullscreen": fullscreen,
             "asset_directory": asset_directory,
             "course_directory": course_directory
