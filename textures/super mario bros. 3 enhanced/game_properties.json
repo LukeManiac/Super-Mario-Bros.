@@ -4,6 +4,7 @@
     "character_properties": {
         "quad_width": 24,
         "midair_turn": true,
+        "star_duration": 6.4,
         "character_data": [
             {
                 "frames": {
