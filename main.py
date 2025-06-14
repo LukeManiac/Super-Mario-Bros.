@@ -203,6 +203,7 @@ def create_course(file):
     globals()["time"] = 100 if nitpicks["hurry_mode"] else (data["timelimit"] if key_exists(data, "timelimit") and isinstance(data["timelimit"], int) else 400)
     globals()["course_time"] = globals()["time"]
     globals()["course_name"] = data["course_name"] if key_exists(data, "course_name") else splitext(basename(file))[0]
+    globals()["asset_directory"] = data["texture"] if key_exists(data, "texture") else asset_directory
     
     tiles = []
     if key_exists(data, "tiles") and isinstance(data["tiles"], dict):
@@ -442,46 +443,34 @@ class ProgressBar:
         try:
             self.color_start, self.color_mid, self.color_end = get_game_property("progress_bar_colors")
         except:
-            raise CustomError("GamePropertyError", "Invalid type for 'progress_bar_colors' in game_properties.json: expected array, got {type(get_game_property('progress_bar_colors')).__name__}.")
+            raise CustomError("GamePropertyError", f"Invalid type for 'progress_bar_colors' in game_properties.json: expected array, got {type(get_game_property('progress_bar_colors')).__name__}.")
         self.color = self.color_start
-        self.full_surf = pygame.Surface((self.bar_width + int(self.circle_radius * 2) + 2, self.height + int(self.circle_radius * 2) + 2), pygame.SRCALPHA)
-        self.offset_surf = pygame.Surface(self.full_surf.get_size(), pygame.SRCALPHA)
+        self.full_surface = pygame.Surface((self.bar_width + int(self.circle_radius * 2) + 2, self.height + int(self.circle_radius * 2) + 2), pygame.SRCALPHA)
+        self.offset_surface = pygame.Surface(self.full_surface.get_size(), pygame.SRCALPHA)
         self.draw_left = self.circle_radius + 1
         self.draw_top = self.circle_radius + 1
 
     def update(self):
-        if vertical:
-            self.playerdist = min(mean(*[player.rect.y + player.rect.height // 2 for player in players]), self.oldplayerdist)
-        elif invertvertical:
-            self.playerdist = max(mean(*[player.rect.y + player.rect.height // 2 for player in players]), self.oldplayerdist)
-        elif inverthorizontal:
-            self.playerdist = min(mean(*[player.rect.x + player.rect.width // 2 for player in players]), self.oldplayerdist)
-        else:
-            self.playerdist = max(mean(*[player.rect.x + player.rect.width // 2 for player in players]), self.oldplayerdist)
+        self.playerdist = (min if vertical or inverthorizontal else max)(mean(*[(player.rect.y if vertical or invertvertical else player.rect.x) + ((player.rect.height if vertical or invertvertical else player.rect.width) // 2) for player in players]), self.oldplayerdist)
         self.progress = range_number((self.playerdist - spawnposx) / (flagpole.x - spawnposx), 0, 1)
-        if vertical:
-            if self.playerdist <= self.oldplayerdist:
-                self.oldplayerdist = self.playerdist
-        else:
-            if self.playerdist > self.oldplayerdist:
-                self.oldplayerdist = self.playerdist
+        self.oldplayerdist = self.playerdist if (vertical and self.playerdist < self.oldplayerdist) or (not vertical and self.playerdist > self.oldplayerdist) else self.oldplayerdist
 
     def draw(self):
         self.color = lerp_color(self.color_start, self.color_mid, self.progress / 0.5) if self.progress <= 0.5 else lerp_color(self.color_mid, self.color_end, (self.progress - 0.5) / 0.5)
 
-        def draw_shapes(surf, c):
-            pygame.draw.circle(surf, c, (self.draw_left, self.draw_top + self.circle_radius), self.circle_radius)
-            pygame.draw.circle(surf, c, (self.draw_left + self.bar_width, self.draw_top + self.circle_radius), self.circle_radius)
-            pygame.draw.rect(surf, c, pygame.Rect(self.draw_left, self.draw_top, self.bar_width, self.height))
+        def draw_shapes(surface, color):
+            pygame.draw.circle(surface, color, (self.draw_left, self.draw_top + self.circle_radius), self.circle_radius)
+            pygame.draw.circle(surface, color, (self.draw_left + self.bar_width, self.draw_top + self.circle_radius), self.circle_radius)
+            pygame.draw.rect(surface, color, pygame.Rect(self.draw_left, self.draw_top, self.bar_width, self.height))
 
         if get_game_property("font_outline"):
             for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
-                draw_shapes(self.offset_surf, (0, 0, 0))
-                self.full_surf.blit(self.offset_surf, (dx, dy))
+                draw_shapes(self.offset_surface, (0, 0, 0))
+                self.full_surface.blit(self.offset_surface, (dx, dy))
 
-        draw_shapes(self.full_surf, self.color)
+        draw_shapes(self.full_surface, self.color)
 
-        screen.blit(self.full_surf.subsurface(pygame.Rect(0, 0, (self.bar_width + self.circle_radius * 2) * (self.progress * (1.02 if get_game_property("font_outline") else 1)), self.full_surf.get_height())), (self.x - self.bar_width // 2 - self.circle_radius - 1, self.y + 12 - self.circle_radius - 1))
+        screen.blit(self.full_surface.subsurface(pygame.Rect(0, 0, (self.bar_width + self.circle_radius * 2) * (self.progress * (1.02 if get_game_property("font_outline") else 1)), self.full_surface.get_height())), (self.x - self.bar_width // 2 - self.circle_radius - 1, self.y + 12 - self.circle_radius - 1))
 
         text.create_text(text=f"{round(self.progress * 100)}%", position=(self.x, self.y), alignment="center", color=self.color, stickxtocamera=True, stickytocamera=True, scale=0.5)
 
@@ -636,7 +625,6 @@ class Text:
     def __init__(self):
         self.font_size = 16
         self.font = pygame.font.Font(load_asset("font.ttf"), self.font_size)
-        self.char_width = self.char_height = 0
 
     def create_text(self, text, position, color=(255, 255, 255), alignment="left", stickxtocamera=False, stickytocamera=False, scale=1):
         x, y = position
@@ -645,15 +633,43 @@ class Text:
         rendered_lines = []
 
         for line in lines:
-            text_surface = self.font.render(line, True, color)
-            text_width, text_height = text_surface.get_size()
-            text_width *= scale
-            text_height *= scale
+            char_colors = None
+            if (
+                isinstance(color, (tuple, list))
+                and len(color) > 0
+                and isinstance(color[0], (tuple, list))
+            ):
+                char_colors = color
 
-            if scale != 1.0:
-                text_surface = pygame.transform.scale(text_surface, (text_width, text_height))
-                self.char_width = text_surface.get_width() * scale
-                self.char_height = text_surface.get_height() * scale
+            if char_colors:
+                chars = list(line)
+                surfaces = []
+                use_default = False
+                for idx, char in enumerate(chars):
+                    if not use_default and idx < len(char_colors):
+                        c = tuple(char_colors[idx])
+                    else:
+                        c = (255, 255, 255)
+                        use_default = True
+                    char_surface = self.font.render(char, True, c)
+                    if scale != 1.0:
+                        char_surface = pygame.transform.scale(char_surface, (int(text_width * scale), int(text_height * scale)))
+                    surfaces.append(char_surface)
+                text_width = sum(s.get_width() for s in surfaces)
+                text_height = max(s.get_height() for s in surfaces) if surfaces else 0
+                text_surface = pygame.Surface((int(text_width * scale), int(text_height * scale)), pygame.SRCALPHA)
+                offset = 0
+                for s in surfaces:
+                    text_surface.blit(s, (offset, 0))
+                    offset += s.get_width()
+            else:
+                text_surface = self.font.render(line, True, color)
+                text_width, text_height = text_surface.get_size()
+                if scale != 1.0:
+                    text_surface = pygame.transform.scale(text_surface, (int(text_width * scale), int(text_height * scale)))
+                text_width, text_height = text_surface.get_size()
+
+            self.char_height = text_surface.get_height() * scale
 
             if get_game_property("font_outline"):
                 outline_size = scale * 2
@@ -2004,8 +2020,7 @@ class Player:
             else:
                 self.fire_timer = self.fire_duration
 
-            if not self.size_change:
-                self.update_hitbox()
+            self.update_hitbox()
 
             if self.fall_timer < self.fall_duration:
                 if self.down:
@@ -3197,12 +3212,12 @@ while running:
         (sound_player.loop_sound if any(player.skidding for player in players) and nor(everyone_dead, pause, any(player.piping for player in players)) else sound_player.stop_sound)(skid_sound)
 
         pause_menu_options = [
-            ["resume", 0.8125],
-            ["restart", 0.9375],
-            [f"music volume: {int(mus_vol * 100)}%", 1.0625],
-            [f"sound volume: {int(snd_vol * 100)}%", 1.1875],
-            [f"fps: {int(FPS)}", 1.3125],
-            ["quit", 1.4375]
+            ["resume", 0.6875],
+            ["restart", 0.8125],
+            [f"music volume: {int(mus_vol * 100)}%", 0.9375],
+            [f"sound volume: {int(snd_vol * 100)}%", 1.0625],
+            [f"fps: {int(FPS)}", 1.1875],
+            ["quit", 1.3125]
         ]
 
         if pause:
