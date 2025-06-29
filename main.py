@@ -15,6 +15,25 @@ infinity = float("inf")
 pi = 3.141592653589793
 main_directory = dirname(sys.executable if getattr(sys, "frozen", False) else abspath(__file__))
 
+def fix_list(obj):
+    return obj[:]
+    
+def key_exists(bundle, key):
+    return key in bundle
+
+def get_key(obj, *keys, default=None, type=None):
+    try:
+        for key in keys:
+            obj = obj[key]
+        if type is not None and not isinstance(obj, type):
+            return default
+        return obj
+    except Exception:
+        return default
+
+def is_negative(value):
+    return 1 if value >= 0 else -1
+
 def radians(deg):
     return deg * (pi / 180)
 
@@ -63,10 +82,16 @@ def lerp(a, b, t):
     return a + (b - a) * t
 
 def lerp_color(color1, color2, t):
-    return [floor(color1[i] + (color2[i] - color1[i]) * t) for i in range(3)]
+    return [floor(get_key(color1, i) + (get_key(color2, i) - get_key(color1, i)) * t) for i in range(3)]
 
 def load_local_file(file):
     return f"{main_directory}/{file}"
+
+if not exists(load_local_file("courses")):
+    makedirs(load_local_file("courses"))
+
+if not exists(load_local_file("textures")):
+    makedirs(load_local_file("textures"))
 
 def load_json(path, *keys, default=None):
     try:
@@ -74,7 +99,7 @@ def load_json(path, *keys, default=None):
             json_file = json.load(file)
 
         for key in keys:
-            json_file = json_file[key]
+            json_file = get_key(json_file, key)
         return json_file
     except (KeyError, TypeError, FileNotFoundError, json.JSONDecodeError):
         return default
@@ -106,54 +131,68 @@ except:
 def get_folders(directory):
     return [folder for folder in listdir(load_local_file(directory))]
 
-if not exists(load_local_file("courses")):
-    makedirs(load_local_file("courses"))
-
-if not exists(load_local_file("textures")):
-    makedirs(load_local_file("textures"))
-    
-def key_exists(bundle, key):
-    return key in bundle
-
 def load_asset(asset):
     return load_local_file(f"{asset_directory}/{asset}" if exists(load_local_file(f"{asset_directory}/{asset}")) else f"assets/{asset}")
 
-def get_game_property(*items):
-    data = load_json(f"{asset_directory}/game_properties")
-    backup_data = load_json("assets/game_properties")
+def replace_infinity(obj):
+    if isinstance(obj, dict):
+        return {k: replace_infinity(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [replace_infinity(i) for i in obj]
+    elif obj == "infinity":
+        return infinity
+    else:
+        return obj
 
-    for item in items:
-        if isinstance(data, list):
-            if isinstance(item, int) and item < len(data):
-                data = data[item]
-            else:
-                data = backup_data[item] if isinstance(backup_data, list) and isinstance(item, int) and item < len(backup_data) else None
-        elif isinstance(data, dict):
-            if item not in data and isinstance(backup_data, dict) and item in backup_data:
-                data[item] = backup_data[item]
-            data = data.get(item, None)
+def get_game_property(*items, default=None):
+    try:
+        data = load_json(f"{asset_directory}/game_properties")
+        backup_data = load_json("assets/game_properties")
 
-        if isinstance(backup_data, list):
-            backup_data = backup_data[item] if isinstance(item, int) and item < len(backup_data) else None
-        elif isinstance(backup_data, dict):
-            backup_data = backup_data.get(item, None)
-
-    def deep_merge(a, b):
-        if isinstance(a, dict) and isinstance(b, dict):
-            for k in b:
-                a[k] = deep_merge(a[k], b[k]) if k in a else b[k]
-        elif isinstance(a, list) and isinstance(b, list):
-            for i in range(len(b)):
-                if i >= len(a):
-                    a.append(b[i])
+        for item in items:
+            if isinstance(data, list):
+                if isinstance(item, int) and item < len(data):
+                    data = get_key(data, item)
+                elif isinstance(backup_data, list) and isinstance(item, int) and item < len(backup_data):
+                    data = get_key(backup_data, item)
                 else:
-                    a[i] = deep_merge(a[i], b[i])
-        return a
+                    return default
+            elif isinstance(data, dict):
+                if item not in data:
+                    if isinstance(backup_data, dict) and item in backup_data:
+                        data[item] = get_key(backup_data, item)
+                    else:
+                        return default
+                data = get_key(data, item)
+            else:
+                return default
 
-    if isinstance(data, (dict, list)) and isinstance(backup_data, (dict, list)):
-        data = deep_merge(data, backup_data)
+            if isinstance(backup_data, list) and isinstance(item, int) and item < len(backup_data):
+                backup_data = get_key(backup_data, item)
+            elif isinstance(backup_data, dict):
+                backup_data = get_key(backup_data, item, default=None)
 
-    return data
+        def deep_merge(a, b):
+            if isinstance(a, dict) and isinstance(b, dict):
+                for k in b:
+                    a[k] = deep_merge(get_key(a, k), get_key(b, k)) if k in a else get_key(b, k)
+                return a
+            elif isinstance(a, list) and isinstance(b, list):
+                result = list(a)
+                for i in range(len(b)):
+                    if i >= len(result):
+                        result.append(get_key(b, i))
+                    else:
+                        result[i] = deep_merge(get_key(result, i), get_key(b, i))
+                return result
+            return a if a is not None else b
+
+        if isinstance(data, (dict, list)) and isinstance(backup_data, (dict, list)):
+            data = deep_merge(data, backup_data)
+
+        return replace_infinity(data) if data is not None else default
+    except:
+        return default
 
 def load_background(background):
     return pygame.image.load(load_asset(f"backgrounds/{background}.png")).convert_alpha()
@@ -182,140 +221,13 @@ def nor(*conditions):
 def xor(a, b):
     return (a or b) and not (a and b)
 
-def create_course(file):
-    data = load_json(file)
-
-    pygame.display.update()
-
-    default_music = {
-        "main_music": data["music"] if key_exists(data, "music") else "overworld",
-        "clear_music": f"{main_music}_clear" if exists(f"{main_music}_clear") else "clear",
-        "dead_music": f"{main_music}_dead" if exists(f"{main_music}_dead") else "dead",
-        "hurry_music": f"{main_music}_hurry" if exists(f"{main_music}_hurry") else "hurry",
-        "star_music": f"{main_music}_star" if exists(f"{main_music}_star") else "star",
-    }
-
-    for key, value in default_music.items():
-        globals()[key] = value
-
-    globals()["background"] = data["background"] if key_exists(data, "background") and isinstance(data["background"], str) else "ground"
-    globals()["y_range"] = (data["height"] if key_exists(data, "height") and isinstance(data["height"], int) else 25) * 16
-    globals()["time"] = 100 if nitpicks["hurry_mode"] else (data["timelimit"] if key_exists(data, "timelimit") and isinstance(data["timelimit"], int) else 400)
-    globals()["course_time"] = globals()["time"]
-    globals()["course_name"] = data["course_name"] if key_exists(data, "course_name") else splitext(basename(file))[0]
-    globals()["asset_directory"] = data["texture"] if key_exists(data, "texture") else asset_directory
-    
-    tiles = []
-    if key_exists(data, "tiles") and isinstance(data["tiles"], dict):
-        for class_name, params_list in data["tiles"].items():
-            if class_name == "Pipe":
-                for params in params_list:
-                    tiles.extend(create_pipe(*params))
-            elif class_name in globals() and callable(globals()[class_name]):
-                for params in params_list:
-                    obj_params = [
-                        globals()[param] if isinstance(param, str) and param in globals() and callable(globals()[param]) else param
-                        for param in (params if isinstance(params, (list, tuple)) else [params])
-                    ]
-                    obj = globals()[class_name](*obj_params)
-                    if hasattr(obj, "spriteset"):
-                        obj.spriteset = (1 if hasattr(obj, "is_ground") and obj.is_ground else data.get("spriteset", 1)) - 1
-                        if hasattr(obj, "tileset"):
-                            obj.tileset = data["tileset"] if key_exists(data, "tileset") and isinstance(data["tileset"], str) else "ground"
-
-                    tiles.append(obj)
-
-    if key_exists(data, "castle") and isinstance(data["castle"], list):
-        globals()["castle"] = data["castle"]
-
-        if key_exists(globals(), "Castle") and callable(globals()["Castle"]):
-            castle_obj = globals()["Castle"](*data["castle"])
-            castle_obj.spriteset = data.get("spriteset", 1) - 1
-            globals()["castle"] = castle_obj
-
-    if key_exists(data, "width") and isinstance(data["width"], int):
-        globals()["x_range"] = (data["width"] - (SCREEN_WIDTH / 16)) * 16
-
-    if key_exists(data, "flagpole") and isinstance(data["flagpole"], list):
-        globals()["flagpole"] = globals()["Flagpole"](*data["flagpole"])
-
-    if key_exists(data, "underwater") and isinstance(data["underwater"], bool):
-        globals()["underwater"] = data["underwater"] or nitpicks["underwater"]
-
-    if key_exists(data, "vertical") and isinstance(data["vertical"], bool):
-        globals()["vertical"] = data["vertical"]
-
-    if key_exists(data, "invertvertical") and isinstance(data["invertvertical"], bool):
-        globals()["invertvertical"] = data["invertvertical"]
-        globals()["vertical"] = False
-
-    if key_exists(data, "inverthorizontal") and isinstance(data["inverthorizontal"], bool):
-        globals()["inverthorizontal"] = data["inverthorizontal"]
-        globals()["vertical"] = False
-
-    globals()["tiles"] = tiles
-
-    if key_exists(data, "spawnpositions") and isinstance(data["spawnpositions"], list):
-        globals()["spawnposx"] = (data["spawnpositions"][0] * 16) + i * 8
-        globals()["spawnposy"] = ((data["spawnpositions"][1] - 4) * 16) - 1
-
-    for category, items in data.items():
-        if key_exists(("tiles", "castle", "background", "tileset", "underwater", "vertical", "invertvertical", "inverthorizontal", "flagpole"), category):
-            continue
-
-        object_list = []
-        if isinstance(items, dict):
-            for class_name, params_list in items.items():
-                if key_exists(globals(), class_name) and callable(globals()[class_name]):
-                    for params in params_list:
-                        obj_params = [
-                            globals()[param] if isinstance(param, str) and key_exists(globals(), param) and callable(globals()[param]) else param
-                            for param in (params if isinstance(params, (list, tuple)) else [params])
-                        ]
-                        obj = globals()[class_name](*obj_params)
-                        if hasattr(obj, "spriteset"):
-                            obj.spriteset = data.get("spriteset", 1) - 1
-
-                        object_list.append(obj)
-
-        globals()[category] = object_list
-
-def create_pipe(x, y, length=2, can_enter=False, new_zone=None, pipe_dir="up", color=1):
-    color -= 1
-    pipes = []
-    id_adjustments = {
-        "up": lambda pid: pid,
-        "down": lambda pid: pid + (4 if key_exists({1, 2}, pid) else 0),
-        "left": lambda pid: pid + (pid == 3) * 8 + (pid == 4) * 4 + (pid == 1) * 11 + (pid == 2) * 7,
-        "right": lambda pid: pid + (pid == 3) * 8 + (pid == 4) * 4 + (pid == 1) * 9 + (pid == 2) * 5
-    }
-    coord_adjustments = {
-        "up": lambda i, j: (x + i, y + j),
-        "down": lambda i, j: (x + i, y - j),
-        "left": lambda i, j: (x - j, y - i),
-        "right": lambda i, j: (x + j, y - i)
-    }
-
-    for i in range(2):
-        for j in range(length):
-            pipe_id = i + (j * 2) + 1
-            while pipe_id >= 5:
-                pipe_id -= 2
-
-            px, py = coord_adjustments[pipe_dir](i, j)
-            pipes.append(Tile(px, py, split_image(load_sprite("pipe"), 16)[id_adjustments[pipe_dir](pipe_id) - 1], color))
-            if can_enter and i == 0 and j == 0:
-                pipe_markers.append(PipeMarker(px + (0.5 if pipe_dir == "up" or pipe_dir == "down" else 0), py + (1 if pipe_dir == "left" or pipe_dir == "right" else 0), pipe_dir, new_zone))
-
-    return pipes
-
 def scale_image(image, scale_factor=1):
     if isinstance(scale_factor, (int, float)):
         new_width = int(image.get_width() * abs(scale_factor))
         new_height = int(image.get_height() * abs(scale_factor))
     elif isinstance(scale_factor, (list, tuple)) and len(scale_factor) == 2:
-        new_width = int(image.get_width() * abs(scale_factor[0]))
-        new_height = int(image.get_height() * abs(scale_factor[1]))
+        new_width = int(image.get_width() * abs(get_key(scale_factor, 0)))
+        new_height = int(image.get_height() * abs(get_key(scale_factor, 1)))
     else:
         raise ValueError(f"Invalid type for 'scale_factor': expected int, float, list, or tuple, got {type(scale_factor).__name__}.")
 
@@ -337,11 +249,154 @@ def split_image(image, cols=1, rows=1):
 
     return cells
 
+def create_course(file, reset_timer=False):
+    data = replace_infinity(load_json(file))
+
+    pygame.display.update()
+
+    default_music = get_key(data, "default_music", default="overworld")
+    main_music = get_key(data, "music", default=default_music)
+
+    def get_music(fanfare):
+        return f"music/{main_music}/{fanfare}" if exists(f"{load_asset(f"music/{main_music}/{fanfare}")}") else fanfare
+
+    music_list = {
+        "default_music": default_music,
+        "main_music": main_music,
+        "clear_music": get_music("clear"),
+        "dead_music": get_music("dead"),
+        "hurry_music": get_music("hurry"),
+        "star_music": get_music("star"),
+    }
+
+    for key, value in music_list.items():
+        globals()[key] = value
+
+    globals()["background"] = get_key(data, "background", default="ground", type=str)
+    globals()["y_range"] = get_key(data, "height", default=25, type=int) * 16
+    globals()["asset_directory"] = get_key(data, "texture", default=asset_directory)
+
+    globals()["time"] = get_key(globals(), "course_time") if reset_timer else (100 if get_key(nitpicks, "hurry_mode") else get_key(data, "timelimit", default=400, type=(int, float)))
+    globals()["course_time"] = get_key(globals(), "time")
+
+    globals()["show_course_name"] = not reset_timer
+    globals()["show_progress_bar"] = get_key(data, "show_progress_bar", default=True, type=bool)
+
+    globals()["course_name"] = get_key(data, "course_name", default=get_key(splitext(basename(file)), 0)) if get_key(globals(), "show_course_name") else None
+    
+    tiles = []
+    if get_key(data, "tiles", type=dict):
+        for class_name, params_list in get_key(data, "tiles", type=dict).items():
+            if class_name == "Pipe":
+                for params in params_list:
+                    x, y = params[:2]
+                    length = get_key(params, 2, default=2, type=int)
+                    can_enter = get_key(params, 3, default=False, type=(bool, str))
+                    new_zone = get_key(params, 4, default=None, type=bool)
+                    pipe_dir = get_key(params, 4, default="up", type=str)
+                    color = get_key(params, 6, default=0, type=int)
+
+                    id_adjustments = {
+                        "up": lambda pid: pid,
+                        "down": lambda pid: pid + (4 if key_exists({1, 2}, pid) else 0),
+                        "left": lambda pid: pid + (pid == 3) * 8 + (pid == 4) * 4 + (pid == 1) * 11 + (pid == 2) * 7,
+                        "right": lambda pid: pid + (pid == 3) * 8 + (pid == 4) * 4 + (pid == 1) * 9 + (pid == 2) * 5
+                    }
+
+                    coord_adjustments = {
+                        "up": lambda i, j: (x + i, y + j),
+                        "down": lambda i, j: (x + i, y - j),
+                        "left": lambda i, j: (x - j, y - i),
+                        "right": lambda i, j: (x + j, y - i)
+                    }
+
+                    for i in range(2):
+                        for j in range(length):
+                            pipe_id = i + (j * 2) + 1
+                            while pipe_id >= 5:
+                                pipe_id -= 2
+
+                            px, py = get_key(coord_adjustments, pipe_dir)(i, j)
+                            tile_img = get_key(split_image(load_sprite("pipe"), 16), id_adjustments[pipe_dir](pipe_id) - 1)
+                            tiles.append(Tile(px, py, tile_img, color))
+
+                            if can_enter and i == 0 and j == 0:
+                                pipe_markers.append(PipeMarker(px + (0.5 if key_exists(("up", "down"), pipe_dir) else 0), py + (1 if key_exists(("left", "right"), pipe_dir) else 0), pipe_dir, new_zone))
+            elif class_name in globals() and callable(get_key(globals(), class_name)):
+                for params in params_list:
+                    obj_params = [get_key(globals(), param) if get_key(globals(), param, type=str) and callable(get_key(globals(), param)) else param for param in (params if isinstance(params, (list, tuple)) else [params])]
+                    if class_name == "Ground":
+                        obj = get_key(globals(), class_name)(*obj_params, tileset=get_key(data, "tileset", default="ground", type=str))
+                    else:
+                        obj = get_key(globals(), class_name)(*obj_params)
+                    if hasattr(obj, "spriteset"):
+                        obj.spriteset = (1 if hasattr(obj, "is_ground") and obj.is_ground else get_key(data, "spriteset", default=1)) - 1
+                        if hasattr(obj, "tileset"):
+                            obj.tileset = get_key(data, "tileset", default="ground", type=str)
+
+                    tiles.append(obj)
+
+    if get_key(data, "castle", type=list):
+        globals()["castle"] = get_key(data, "castle")
+
+        if key_exists(globals(), "Castle") and callable(get_key(globals(), "Castle")):
+            castle_obj = get_key(globals(), "Castle")(*get_key(data, "castle"))
+            castle_obj.spriteset = get_key(data, "spriteset", default=1) - 1
+            globals()["castle"] = castle_obj
+
+    if get_key(data, "width", type=int):
+        globals()["x_range"] = (max(40, get_key(data, "width", default=40)) - (SCREEN_WIDTH / 16)) * 16
+
+    if get_key(data, "flagpole", type=list):
+        globals()["flagpole"] = get_key(globals(), "Flagpole")(*get_key(data, "flagpole"))
+
+    if get_key(data, "underwater", type=bool):
+        globals()["underwater"] = get_key(data, "underwater")
+
+    if not get_key(globals(), "underwater"):
+        globals()["underwater"] = get_key(nitpicks, "underwater")
+
+    if get_key(data, "vertical", type=bool):
+        globals()["vertical"] = get_key(data, "vertical")
+
+    if get_key(data, "invertvertical", type=bool):
+        globals()["invertvertical"] = get_key(data, "invertvertical")
+        globals()["vertical"] = False
+
+    if get_key(data, "inverthorizontal", type=bool):
+        globals()["inverthorizontal"] = get_key(data, "inverthorizontal")
+        globals()["vertical"] = False
+
+    globals()["tiles"] = tiles
+
+    if get_key(data, "spawnpositions", type=list):
+        globals()["spawnposx"] = get_key(data, "spawnpositions", 0) * 16
+        globals()["spawnposy"] = (get_key(data, "spawnpositions", 1) - 5) * 16 - 1
+
+    for category, items in data.items():
+        if key_exists(("tiles", "castle", "background", "tileset", "underwater", "vertical", "invertvertical", "inverthorizontal", "flagpole"), category):
+            continue
+
+        object_list = []
+        if isinstance(items, dict):
+            for class_name, params_list in items.items():
+                if key_exists(globals(), class_name) and callable(get_key(globals(), class_name)):
+                    for params in params_list:
+                        obj_params = [get_key(globals(), param) if get_key(globals(), param, type=str) and callable(get_key(globals(), param)) else param for param in (params if isinstance(params, (list, tuple)) else [params])]
+                        obj = get_key(globals(), class_name)(*obj_params)
+                        if hasattr(obj, "spriteset"):
+                            obj.spriteset = get_key(data, "spriteset", default=1) - 1
+
+                        object_list.append(obj)
+
+        globals()[category] = object_list
+
 def initialize_game():
     globals()["menu"] = False
     globals()["pause"] = False
     globals()["game_ready"] = False
     globals()["reset_ready"] = False
+    globals()["pipe_ready"] = False
     globals()["everyone_dead"] = False
     globals()["game_over"] = False
     globals()["fast_music"] = False
@@ -350,10 +405,9 @@ def initialize_game():
     globals()["intro_players"] = None
     globals()["logo"] = None
     globals()["title_ground"] = None
-    globals()["castle"] = None
+    globals()["castle_obj"] = None
     globals()["dt"] = 0
     globals()["game_dt"] = 0
-    globals()["time"] = 0
     globals()["pipe_wait_timer"] = 0
     globals()["players"] = []
     globals()["power_meters"] = []
@@ -368,6 +422,8 @@ def initialize_game():
     globals()["fireballs_table"] = {str(i): [] for i in range(player_count)}
     globals()["hud"] = CoinHUD()
     globals()["progress_bar"] = ProgressBar()
+    globals()["camera"].x = 0
+    globals()["camera"].y = 0
 
 def reload_data():
     globals()["beep_sound"] = load_sound("beep")
@@ -397,6 +453,9 @@ def reload_data():
     globals()["characters_name"] = [get_game_property("character_properties", "character_data", i, "name") for i in count_list_items(characters_data)]
     globals()["characters_color"] = [get_game_property("character_properties", "character_data", i, "color") for i in count_list_items(characters_data)]
     globals()["camera"] = Camera(get_game_property("camera_smoothness"))
+    globals()["text"].font = pygame.font.Font(load_asset("font.ttf"), get_key(globals(), "text").font_size)
+    globals()["logo"].spritesheet = load_sprite("logo")
+    pygame.display.set_icon(pygame.image.load(load_asset("icon.ico")))
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 640, 400
 MIN_RUN_TIMER = 0
@@ -404,7 +463,6 @@ MAX_RUN_TIMER = get_game_property("character_properties", "max_run_timer") * 10
 WALK_SPEED = get_game_property("character_properties", "walk_speed")
 RUN_SPEED = get_game_property("character_properties", "run_speed")
 JUMP_HOLD_TIME = 10
-MIN_SPEEDX = 0.25
 FPS = load_json("settings", "fps", default=60)
 OLD_FPS = FPS
 FADE_DURATION = 30
@@ -480,23 +538,22 @@ class Flagpole:
         self.image = [load_sprite("flagpole"), load_sprite("flag")]
         self.height = height + 1
         self.sprites = [pygame.Rect(0, 16 * i, 16, 16) for i in range(2)]
-        self.flag_sprite_count = get_game_property("flagpole", "frames")
-        self.flag_sprite_speed = get_game_property("flagpole", "speed")
-        self.flag_sprite_size = self.image[1].get_size()
-        self.flag_sprite = [pygame.Rect((self.flag_sprite_size[0] / self.flag_sprite_count) * i, 0, self.flag_sprite_size[0] / self.flag_sprite_count, self.flag_sprite_size[1]) for i in range(self.flag_sprite_count)]
+        self.flag_sprite_data = get_game_property("flagpole")
+        self.flag_sprite_size = get_key(self.image, 1).get_size()
+        self.flag_sprite = [pygame.Rect((get_key(self.flag_sprite_size, 0) / get_key(self.flag_sprite_data, "frames")) * i, 0, get_key(self.flag_sprite_size, 0) / get_key(self.flag_sprite_data, "frames"), get_key(self.flag_sprite_size, 1)) for i in range(get_key(self.flag_sprite_data, "frames"))]
         self.dt = 0
         self.frame_index = 0
         self.flag_offset = 0
 
     def update(self):
         self.dt += 1
-        self.frame_index = int((self.dt / 60) / self.flag_sprite_speed) % self.flag_sprite_count
+        self.frame_index = int((self.dt / 60) / get_key(self.flag_sprite_data, "speed")) % get_key(self.flag_sprite_data, "frames")
 
     def draw(self):
-        screen.blit(self.image[0].subsurface(self.sprites[0]), (self.x - camera.x, self.y - camera.y - (self.height * 16)))
+        screen.blit(get_key(self.image, 0).subsurface(get_key(self.sprites, 0)), (self.x - camera.x, self.y - camera.y - (self.height * 16)))
         for i in range(self.height):
-            screen.blit(self.image[0].subsurface(self.sprites[1]), (self.x - camera.x, self.y - camera.y - (i * 16)))
-        screen.blit(self.image[1].subsurface(self.flag_sprite[self.frame_index]), (self.x - camera.x - ((self.flag_sprite_size[0] / self.flag_sprite_count) / 2), self.y - camera.y - ((self.height - 1) * 16)))
+            screen.blit(get_key(self.image, 0).subsurface(get_key(self.sprites, 1)), (self.x - camera.x, self.y - camera.y - (i * 16)))
+        screen.blit(get_key(self.image, 1).subsurface(get_key(self.flag_sprite, self.frame_index)), (self.x - camera.x - ((get_key(self.flag_sprite_size, 0) / get_key(self.flag_sprite_data, "frames")) / 2), self.y - camera.y - ((self.height - 1) * 16)))
 
 class Trail:
     def __init__(self, image, position):
@@ -513,9 +570,10 @@ class Trail:
         screen.blit(set_image_alpha(self.image, self.alpha), (self.x - camera.x, self.y - camera.y))
 
 class PipeMarker:
-    def __init__(self, x, y, pipe_dir, zone):
+    def __init__(self, x, y, pipe_dir, zone, exit=False):
         self.x = x * 16
         self.y = y * 16 + 8
+        self.exit = exit
         if pipe_dir == "up":
             self.y -= 1
         elif pipe_dir == "down":
@@ -539,17 +597,17 @@ class SFXPlayer:
         if not key_exists(self.sounds, sound):
             self.sounds[sound] = sound
 
-        pitched_sound = self.change_pitch(self.sounds[sound], pitch)
+        pitched_sound = self.change_pitch(get_key(self.sounds, sound), pitch)
         pitched_sound.set_volume(snd_vol)
         pitched_sound.stop()
         pitched_sound.play()
 
     def change_pitch(self, sound, semitones):
-        return sound if semitones == 0 else pygame.sndarray.make_sound(pygame.sndarray.array(sound)[numpy.round(numpy.linspace(0, len(pygame.sndarray.array(sound)) - 1, int(len(pygame.sndarray.array(sound)) / (2 ** (semitones / 12))))).astype(int)])
+        return sound if semitones == 0 else pygame.sndarray.make_sound(get_key(pygame.sndarray.array(sound), numpy.round(numpy.linspace(0, len(pygame.sndarray.array(sound)) - 1, int(len(pygame.sndarray.array(sound)) / (2 ** (semitones / 12))))).astype(int)))
 
     def stop_sound(self, sound):
         if key_exists(self.sounds, sound):
-            self.sounds[sound].stop()
+            get_key(self.sounds, sound).stop()
 
     def stop_all_sounds(self):
         for sound in self.sounds.values():
@@ -557,13 +615,13 @@ class SFXPlayer:
 
     def loop_sound(self, sound):
         self.sounds[sound] = sound
-        if key_exists(self.sounds, sound) and not self.is_playing(self.sounds[sound]):
-            self.sounds[sound].set_volume(snd_vol)
-            self.sounds[sound].play(-1)
+        if key_exists(self.sounds, sound) and not self.is_playing(get_key(self.sounds, sound)):
+            get_key(self.sounds, sound).set_volume(snd_vol)
+            get_key(self.sounds, sound).play(-1)
 
     def set_volume(self, volume):
-        for sound_name in self.sounds:
-            self.sounds[sound_name].set_volume(volume)
+        for sound in self.sounds:
+            get_key(self.sounds, sound).set_volume(volume)
 
     def is_playing(self, *sounds):
         return any(sound.get_num_channels() > 0 for sound in sounds)
@@ -579,10 +637,7 @@ class BGMPlayer:
         if not self.paused:
             self.stop_music()
             self.music = load_asset(f"music/{music}.ogg")
-            try:
-                self.loop_point = get_game_property("loop_points", music)
-            except KeyError:
-                self.loop_point = False
+            self.loop_point = get_game_property("loop_points", music, default=False)
             if nor(isinstance(self.loop_point, (int, bool)), self.loop_point is None):
                 raise CustomError("LoopPointError", f"Invalid type for 'loop_points' in {asset_directory}/loop_points.json: expected int, got {type(self.loop_point).__name__}.")
             pygame.mixer.music.load(self.music)
@@ -607,7 +662,7 @@ class BGMPlayer:
         pygame.mixer.music.fadeout(int(FADE_DURATION * (1000 / clock.get_fps())))
 
     def pause_music(self):
-        if nitpicks["play_music_in_pause"]:
+        if get_key(nitpicks, "play_music_in_pause"):
             return
         self.paused = not self.paused
         (pygame.mixer.music.pause if self.paused else pygame.mixer.music.unpause)()
@@ -634,11 +689,7 @@ class Text:
 
         for line in lines:
             char_colors = None
-            if (
-                isinstance(color, (tuple, list))
-                and len(color) > 0
-                and isinstance(color[0], (tuple, list))
-            ):
+            if (isinstance(color, (tuple, list))and len(color) > 0 and isinstance(get_key(color, 0), (tuple, list))):
                 char_colors = color
 
             if char_colors:
@@ -647,7 +698,7 @@ class Text:
                 use_default = False
                 for idx, char in enumerate(chars):
                     if not use_default and idx < len(char_colors):
-                        c = tuple(char_colors[idx])
+                        c = tuple(get_key(char_colors, idx))
                     else:
                         c = (255, 255, 255)
                         use_default = True
@@ -710,10 +761,7 @@ class Background:
         self.layer_width = 0
         self.bg_width = 0
         self.bg_height = 0
-        try:
-            self.parallax_offset = get_game_property("parallax_offset")
-        except:
-            self.parallax_offset = 0
+        self.parallax_offset = get_game_property("parallax_offset", default=0)
 
     def load_background(self, bgname):
         self.bg_layers_count = get_game_property("background_layers", bgname)
@@ -734,13 +782,13 @@ class Background:
 
     def draw(self):
         for i in count_list_items(self.bg_layers):
-            layer_x = self.bg_positions[i]
+            layer_x = get_key(self.bg_positions, i)
             while layer_x < SCREEN_WIDTH:
-                screen.blit(self.bg_layers[i], (layer_x, SCREEN_HEIGHT - self.bg_height))
+                screen.blit(get_key(self.bg_layers, i), (layer_x, SCREEN_HEIGHT - self.bg_height))
                 layer_x += self.layer_width
-            layer_x = self.bg_positions[i] - self.layer_width
+            layer_x = get_key(self.bg_positions, i) - self.layer_width
             while layer_x < 0:
-                screen.blit(self.bg_layers[i], (layer_x, SCREEN_HEIGHT - self.bg_height))
+                screen.blit(get_key(self.bg_layers, i), (layer_x, SCREEN_HEIGHT - self.bg_height))
                 layer_x += self.layer_width
 
 class Camera:
@@ -759,8 +807,8 @@ class Logo:
     def __init__(self):
         self.spritesheet = load_sprite("logo")
         self.spritesheet_size = self.spritesheet.get_size()
-        self.x = centerx - (self.spritesheet_size[0] // 2)
-        self.y = -self.spritesheet_size[1]
+        self.x = centerx - (get_key(self.spritesheet_size, 0) // 2)
+        self.y = -get_key(self.spritesheet_size, 1)
         self.speedy = 0
         self.timer = 0
         self.bounce_y = 48
@@ -792,17 +840,17 @@ class TitleGround:
     def draw(self):
         for i in range((SCREEN_WIDTH // 16) + 1):
             x = i * 16
-            screen.blit(self.sprite[1], (x - (camera.x % 16), self.y - camera.y))
-            screen.blit(self.sprite[9], (x - (camera.x % 16), self.y + 16 - camera.y))
+            screen.blit(get_key(self.sprite, 1), (x - (camera.x % 16), self.y - camera.y))
+            screen.blit(get_key(self.sprite, 9), (x - (camera.x % 16), self.y + 16 - camera.y))
 
 class PowerMeter:
     def __init__(self, player):
         self.spritesheet = load_sprite("powermeter")
         self.spritesheet_width, self.spritesheet_height = self.spritesheet.get_size()
-        self.power_meter_quads = get_game_property("power_meter_frames") or 8
+        self.power_meter_quads = get_game_property("power_meter_frames", default=8)
         self.frames = [pygame.Rect(0, i * (self.spritesheet_height // self.power_meter_quads), self.spritesheet_width, (self.spritesheet_height // self.power_meter_quads)) for i in range(self.power_meter_quads)]
         self.player = player
-        self.current_frame = 0
+        self.frame_index = 0
         self.frame_swap_timer = 0
         self.swap_state = False
 
@@ -812,13 +860,13 @@ class PowerMeter:
             if self.frame_swap_timer >= 6:
                 self.swap_state = not self.swap_state
                 self.frame_swap_timer = 0
-            self.current_frame = 7 if self.swap_state else 6
+            self.frame_index = 7 if self.swap_state else 6
         else:
-            self.current_frame = min(int(self.player.run_timer) // int(round(MAX_RUN_TIMER / 7.5)), 7)
+            self.frame_index = min(int(self.player.run_timer) // int(round(MAX_RUN_TIMER / 7.5)), 7)
             self.frame_swap_timer = 0
 
     def draw(self):
-        screen.blit(self.spritesheet.subsurface(self.frames[self.current_frame]), (48 + 8 * len(str(self.player.lives)), 24 + (self.player.player_number + 1) * 16))
+        screen.blit(self.spritesheet.subsurface(get_key(self.frames, self.frame_index)), (48 + 8 * len(str(self.player.lives)), 24 + (self.player.player_number + 1) * 16))
 
 class Score:
     def __init__(self, x, y, points=100):
@@ -826,7 +874,7 @@ class Score:
         self.image = load_sprite("score")
         self.image_width, self.image_height = self.image.get_size()
         self.frames = [pygame.Rect(0, i * (self.image_height // 9), self.image_width, (self.image_height // 9)) for i in range(9)]
-        self.frame_index = {100: 0, 200: 1, 400: 2, 800: 3, 1000: 4, 2000: 5, 4000: 6, 8000: 7, 10000: 8}.get(points, -1)
+        self.frame_index = get_key({100: 0, 200: 1, 400: 2, 800: 3, 1000: 4, 2000: 5, 4000: 6, 8000: 7, 10000: 8}, points, default=-1)
         self.dt = 0
         if not points == 10000:
             globals()["score"] += points
@@ -837,7 +885,7 @@ class Score:
             overlays.remove(self)
 
     def draw(self):
-        screen.blit(self.image.subsurface(self.frames[self.frame_index]), (self.x, self.y - self.dt))
+        screen.blit(self.image.subsurface(get_key(self.frames, self.frame_index)), (self.x, self.y - self.dt))
 
 class CoinAnimation:
     def __init__(self, x, y, **kwargs):
@@ -855,7 +903,7 @@ class CoinAnimation:
             overlays.append(Score(self.x - camera.x, self.y - camera.y + 32, 200))
 
     def draw(self):
-        screen.blit(self.image.subsurface(self.sprites[self.dt]), (self.x - camera.x - (((self.image_width // 32) - 8) / 2), self.y - camera.y))
+        screen.blit(self.image.subsurface(get_key(self.sprites, self.dt)), (self.x - camera.x - (((self.image_width // 32) - 8) / 2), self.y - camera.y))
 
 class CoinHUD:
     def __init__(self, coins=0):
@@ -881,7 +929,7 @@ class PlayerHUD:
         self.image = load_sprite("playerhud")
         self.sprite_size = self.image.get_size()
         self.time_passed = 0
-        self.sprites = [[pygame.Rect(x * (self.sprite_size[0] // 2), y * (self.sprite_size[1] // len(characters_data)), (self.sprite_size[0] // 2), (self.sprite_size[1] // len(characters_data))) for x in range(2)] for y in count_list_items(characters_data)]
+        self.sprites = [[pygame.Rect(x * (get_key(self.sprite_size, 0) // 2), y * (get_key(self.sprite_size, 1) // len(characters_data)), (get_key(self.sprite_size, 0) // 2), (get_key(self.sprite_size, 1) // len(characters_data))) for x in range(2)] for y in count_list_items(characters_data)]
 
     def update(self):
         self.player_number = self.player.player_number + 1
@@ -895,9 +943,10 @@ class PlayerHUD:
 
     def draw(self):
         try:
-            sprite = self.image.subsurface(self.sprites[self.player_number - 1][self.size])
-            sprite = pygame.transform.flip(sprite, nitpicks["moonwalking_mario"], False)
-            screen.blit(sprite, (((self.sprite_size[0] // 2)) - 4, (((self.sprite_size[1] // len(characters_data))) + 4) + self.player_number * 16))
+            sprite = self.image.subsurface(get_key(self.sprites, self.player_number - 1, self.size))
+            
+            sprite = pygame.transform.flip(sprite, get_key(nitpicks, "moonwalking_mario"), False)
+            screen.blit(sprite, (((get_key(self.sprite_size, 0) // 2)) - 4, (((get_key(self.sprite_size, 1) // len(characters_data))) + 4) + self.player_number * 16))
 
             if self.star:
                 star_mask = sprite.copy()
@@ -911,7 +960,7 @@ class PlayerHUD:
                     self.last_color_index = color_index
 
                 star_mask.fill(get_game_property("star_colors", color_index), special_flags=pygame.BLEND_RGBA_MULT)
-                screen.blit(star_mask, (((self.sprite_size[0] // 2)) - 4, (((self.sprite_size[1] // len(characters_data))) + 4) + self.player_number * 16))
+                screen.blit(star_mask, (((get_key(self.sprite_size, 0) // 2)) - 4, (((get_key(self.sprite_size, 1) // len(characters_data))) + 4) + self.player_number * 16))
         except AttributeError:
             pass
 
@@ -945,6 +994,9 @@ class Tile:
         self.breakable = breakable
         self.item = item
         self.item_spawn_anim = item_spawn_anim
+
+        if isinstance(self.item, str) and nor(self.item == CoinAnimation, str(self.item) == "MultiCoin"):
+            self.item = get_key(globals(), self.item)
 
         self.broken = False
         
@@ -984,13 +1036,13 @@ class Tile:
                         self.top_collide = True
                         self.bottom_collide = True
                     if self.item == Mushroom:
-                        if nitpicks["non-progressive_powerups"] or (self.player and not self.player.size == 0):
+                        if get_key(nitpicks, "non-progressive_powerups") or (self.player and not self.player.size == 0):
                             self.item = FireFlower
                     else:
                         if not str(self.item) == "MultiCoin":
                             self.item_spawned = True
                             if not self.item == CoinAnimation:
-                                if ((getattr(self.item(infinity, infinity) if isinstance(self.item, type) else self.item, "progressive", False) and self.player and self.player.size == 0) and not nitpicks["non-progressive_powerups"]):
+                                if ((getattr(self.item(infinity, infinity) if isinstance(self.item, type) else self.item, "progressive", False) and self.player and self.player.size == 0) and not get_key(nitpicks, "non-progressive_powerups")):
                                     self.item = Mushroom
                     if self.item == CoinAnimation:
                         particles.append(CoinAnimation(self.og_x, self.og_y - 1, spriteset=self.spriteset, sprout=False))
@@ -1031,7 +1083,7 @@ class Tile:
         
         self.image_scale = 1 - (self.y_offset / 8)
         try:
-            self.sprite = (self.image if self.is_ground else self.image.subsurface(self.sprites[self.spriteset])) if self.image_scale == 1 else scale_image(self.image if self.is_ground else self.image.subsurface(self.sprites[self.spriteset]), self.image_scale)
+            self.sprite = (self.image if self.is_ground else self.image.subsurface(get_key(self.sprites, self.spriteset))) if self.image_scale == 1 else scale_image(self.image if self.is_ground else self.image.subsurface(get_key(self.sprites, self.spriteset)), self.image_scale)
         except:
             self.sprite = None
 
@@ -1048,11 +1100,11 @@ class Tile:
 
     def draw(self):
         if nor(self.sprite is None, self.broken):
-            screen.blit(self.sprite, (self.x - camera.x - (self.sprite.get_width() / (1 if self.image_scale == 1 else 2)) + 16, self.y - camera.y + (0 if nitpicks["inverted_block_bounce"] else (self.y_offset * 4))))
+            screen.blit(self.sprite, (self.x - camera.x - (self.sprite.get_width() / (1 if self.image_scale == 1 else 2)) + 16, self.y - camera.y + (0 if get_key(nitpicks, "inverted_block_bounce") else (self.y_offset * 4))))
 
 class Ground(Tile):
-    def __init__(self, x, y, tile_index=1, tileset="ground"):
-        super().__init__(x, y, split_image(load_sprite(f"tiles_{tileset}"), 8, 6)[tile_index - 1], 0, is_ground=True)
+    def __init__(self, x, y, tile_index=1, tileset="ground", rows=8, cols=6):
+        super().__init__(x, y, get_key(split_image(load_sprite(f"tiles_{tileset}"), rows, cols), tile_index - 1), 0, is_ground=True)
 
 class HardBlock(Tile):
     def __init__(self, x, y, spriteset=1):
@@ -1073,7 +1125,7 @@ class AnimatedTile(Tile):
         super().update()
         self.frame_index = int((dt / (60 / self.cols) / self.anim_speed) % self.total_frames)
         try:
-            self.sprite = (self.image.subsurface(self.sprites[self.spriteset if not self.hit else 0][self.frame_index if nor(self.broken, self.hit) else 0])) if self.image_scale == 1 else scale_image(self.image.subsurface(self.sprites[self.spriteset if not self.hit else 0][self.frame_index if nor(self.broken, self.hit) else 0]), self.image_scale)
+            self.sprite = (self.image.subsurface(get_key(self.sprites, self.spriteset if not self.hit else 0, self.frame_index if nor(self.broken, self.hit) else 0))) if self.image_scale == 1 else scale_image(self.image.subsurface(get_key(self.sprites, self.spriteset if not self.hit else 0, self.frame_index if nor(self.broken, self.hit) else 0)), self.image_scale)
         except:
             self.sprite = None
 
@@ -1121,7 +1173,7 @@ class BrickDebris:
         self.sprites = [[pygame.Rect(row * 8, column * 8, 8, 8) for row in range(2)] for column in range(4)]
         self.angle = 0
         self.gravity = 0.25
-        self.quad = self.image.subsurface(self.sprites[self.spriteset][0])
+        self.quad = self.image.subsurface(get_key(self.sprites, self.spriteset, 0))
 
     def update(self):
         self.x += self.speedx
@@ -1129,8 +1181,8 @@ class BrickDebris:
         self.speedy += self.gravity
         self.sprite = int(self.speedx > 0)
         self.angle -= self.speedx * 4
-        self.quad = self.image.subsurface(self.sprites[self.spriteset][self.sprite])
-        self.rotated_image = pygame.transform.rotate(self.image.subsurface(self.sprites[self.spriteset][self.sprite]), self.angle)
+        self.quad = self.image.subsurface(get_key(self.sprites, self.spriteset, self.sprite))
+        self.rotated_image = pygame.transform.rotate(self.image.subsurface(get_key(self.sprites, self.spriteset, self.sprite)), self.angle)
         if self.y >= (y_range or SCREEN_HEIGHT) + 16:
             debris.remove(self)
     
@@ -1153,9 +1205,9 @@ class Mushroom:
         self.sprout_timer = 0
         self.spriteset = spriteset
         self.sprite_size = self.sprite.get_size()
-        self.frames = self.sprite_size[0] // 16
-        self.quad_size = self.sprite_size[0] // self.frames
-        self.spriteset_size = self.sprite_size[1] // 4
+        self.frames = get_key(self.sprite_size, 0) // 16
+        self.quad_size = get_key(self.sprite_size, 0) // self.frames
+        self.spriteset_size = get_key(self.sprite_size, 1) // 4
         self.sprites = [[pygame.Rect(self.quad_size * i, self.spriteset_size * j, self.quad_size, self.spriteset_size) for i in range(self.frames)] for j in range(4)]
 
     def update(self):
@@ -1211,7 +1263,7 @@ class Mushroom:
         return nor((self.y < camera.y + SCREEN_HEIGHT + self.rect.height), (self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
 
     def draw(self):
-        screen.blit(self.sprite.subsurface(self.sprites[self.spriteset][self.frame_index]), (self.x - camera.x, self.y - camera.y))
+        screen.blit(self.sprite.subsurface(get_key(self.sprites, self.spriteset, self.frame_index)), (self.x - camera.x, self.y - camera.y))
 
 class OneUp(Mushroom):
     def __init__(self, x, y, sprout=False, spriteset=1):
@@ -1219,9 +1271,9 @@ class OneUp(Mushroom):
         self.lives = 1
         self.sprite = load_sprite("oneup")
         self.sprite_size = self.sprite.get_size()
-        self.frames = self.sprite_size[0] // 16
-        self.quad_size = self.sprite_size[0] // self.frames
-        self.spriteset_size = self.sprite_size[1] // 4
+        self.frames = get_key(self.sprite_size, 0) // 16
+        self.quad_size = get_key(self.sprite_size, 0) // self.frames
+        self.spriteset_size = get_key(self.sprite_size, 1) // 4
         self.sprites = [[pygame.Rect(self.quad_size * i, self.spriteset_size * j, self.quad_size, self.spriteset_size) for i in range(self.frames)] for j in range(4)]
 
     def update(self):
@@ -1243,9 +1295,9 @@ class FireFlower:
         self.spriteset = spriteset
         self.sprite = load_sprite("fireflower")
         self.sprite_size = self.sprite.get_size()
-        self.frames = self.sprite_size[0] // 16
-        self.quad_size = self.sprite_size[0] // self.frames
-        self.spriteset_size = self.sprite_size[1] // 4
+        self.frames = get_key(self.sprite_size, 0) // 16
+        self.quad_size = get_key(self.sprite_size, 0) // self.frames
+        self.spriteset_size = get_key(self.sprite_size, 1) // 4
         self.sprites = [[pygame.Rect(self.quad_size * i, self.spriteset_size * j, self.quad_size, self.spriteset_size) for i in range(self.frames)] for j in range(4)]
         self.speedx = 0
         self.speedy = -0.5 if sprout else 0
@@ -1293,7 +1345,7 @@ class FireFlower:
         return nor((self.y < camera.y + SCREEN_HEIGHT + self.rect.height), (self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
 
     def draw(self):
-        screen.blit(self.sprite.subsurface(self.sprites[self.spriteset][self.frame_index]), (self.x - camera.x, self.y - camera.y))
+        screen.blit(self.sprite.subsurface(get_key(self.sprites, self.spriteset, self.frame_index)), (self.x - camera.x, self.y - camera.y))
 
 class Star:
     def __init__(self, x, y, sprout=False, spriteset=1):
@@ -1308,9 +1360,9 @@ class Star:
         self.sprouting = sprout
         self.sprout_timer = 0
         self.sprite_size = self.sprite.get_size()
-        self.frames = self.sprite_size[0] // 16
-        self.quad_size = self.sprite_size[0] // self.frames
-        self.spriteset_size = self.sprite_size[1] // 4
+        self.frames = get_key(self.sprite_size, 0) // 16
+        self.quad_size = get_key(self.sprite_size, 0) // self.frames
+        self.spriteset_size = get_key(self.sprite_size, 1) // 4
         self.sprites = [[pygame.Rect(self.quad_size * i, self.spriteset_size * j, self.quad_size, self.spriteset_size) for i in range(4)] for j in range(self.frames)]
         self.spriteset = spriteset
         self.frame_index = 0
@@ -1369,7 +1421,7 @@ class Star:
         return nor((self.y < camera.y + SCREEN_HEIGHT + self.rect.height), (self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
 
     def draw(self):
-        screen.blit(self.sprite.subsurface(self.sprites[self.spriteset][self.frame_index]), (self.x - camera.x, self.y - camera.y))
+        screen.blit(self.sprite.subsurface(get_key(self.sprites, self.spriteset, self.frame_index)), (self.x - camera.x, self.y - camera.y))
 
 class Fireball:
     def __init__(self, player):
@@ -1396,7 +1448,7 @@ class Fireball:
             self.frame_timer += 1
             self.frame_index = floor(min(self.frame_timer / 4, 3))
             if self.frame_timer >= 15:
-                fireballs_table[str(self.player.player_number)].remove(self)
+                get_key(fireballs_table, str(self.player.player_number)).remove(self)
         else:
             self.angle -= 12 * (-1 if self.speedx < 0 else 1)
 
@@ -1459,7 +1511,7 @@ class Fireball:
 
     def draw(self):
         if self.dt > 1:
-            screen.blit(pygame.transform.rotate(self.sprite.subsurface(self.sprites[self.frame_index]), self.angle), (self.x - camera.x, self.y - camera.y - 3))
+            screen.blit(pygame.transform.rotate(self.sprite.subsurface(get_key(self.sprites, self.frame_index)), self.angle), (self.x - camera.x, self.y - camera.y - 3))
 
 class Goomba:
     def __init__(self, x, y, spriteset=1):
@@ -1467,7 +1519,7 @@ class Goomba:
         self.spriteset = spriteset
         self.properties = get_game_property("enemies", "goomba")
         self.sprite = load_sprite("goomba")
-        self.total_frames = sum(self.properties["frames"].values())
+        self.total_frames = sum(get_key(self.properties, "frames").values())
         self.spr_width, self.spr_height = self.sprite.get_size()
         self.quad_width = self.spr_width // self.total_frames
         self.sprites = [[pygame.Rect(i * self.quad_width, j * self.spr_height // 4, self.quad_width, self.spr_height // 4) for i in range(self.total_frames)] for j in range(4)]
@@ -1488,14 +1540,14 @@ class Goomba:
             self.y += self.speedy
             self.speedy += self.gravity
             try:
-                self.frame_index = self.properties["frames"]["normal"] + int((self.dt * self.properties["frame_speeds"]["shot"]) % self.properties["frames"]["shot"])
+                self.frame_index = get_key(self.properties, "frames", "normal") + int((self.dt * get_key(self.properties, "frame_speeds", "shot")) % get_key(self.properties, "frames", "shot"))
             except:
                 pass
             if self.rect.top >= SCREEN_HEIGHT:
                 enemies.remove(self)
         else:
             if self.stomped:
-                self.frame_index = self.properties["frames"]["normal"] + (self.properties["frames"]["shot"] if key_exists(self.properties["frames"], "shot") else 0) + int((self.dt * self.properties["frame_speeds"]["stomp"]) % self.properties["frames"]["stomp"])
+                self.frame_index =get_key(self.properties, "frames", "normal") + (get_key(self.properties, "frames", "shot") if key_exists(get_key(self.properties, "frames"), "shot") else 0) + int((self.dt * get_key(self.properties, "frames", "stomp")) % get_key(self.properties, "frames", "stomp"))
                 self.dt += 1
                 if self.dt >= 30:
                     enemies.remove(self)
@@ -1546,7 +1598,7 @@ class Goomba:
                         break
 
                 self.rect.topleft = (self.x, self.y)
-                self.frame_index = int((self.dt * self.properties["frame_speeds"]["normal"]) % self.properties["frames"]["normal"])
+                self.frame_index = int((self.dt * get_key(self.properties, "frame_speeds", "normal")) % get_key(self.properties, "frames", "normal"))
 
     def stomp(self):
         self.rect = pygame.Rect(0, 0, 0, 0)
@@ -1581,21 +1633,18 @@ class Goomba:
         return nor((self.y < camera.y + SCREEN_HEIGHT + self.rect.height), (self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
 
     def draw(self):
-        image = pygame.transform.rotate(self.sprite.subsurface(self.sprites[self.spriteset][self.frame_index]), self.angle)
-        image = pygame.transform.flip(image, xor((self.speedx > 0 and not self.shotted), nitpicks["moonwalking_enemies"]), False)
+        image = pygame.transform.rotate(self.sprite.subsurface(get_key(self.sprites, self.spriteset, self.frame_index)), self.angle)
+        image = pygame.transform.flip(image, xor((self.speedx > 0 and not self.shotted), get_key(nitpicks, "moonwalking_enemies")), False)
         screen.blit(image, (self.x - camera.x, self.y - camera.y + 1))
 
 class Koopa:
     def __init__(self, x, y, spriteset=1):
         self.x, self.y = x * 16, y * 16 + 8
         self.properties = get_game_property("enemies", "koopa")
-        try:
-            self.offset_y = self.properties["offsety"]
-        except:
-            self.offset_y = 0
+        self.offset_y = get_key(self.properties, "offsety")
         self.spriteset = spriteset
         self.sprite = load_sprite("koopa")
-        self.total_frames = sum(self.properties["frames"].values())
+        self.total_frames = sum(get_key(self.properties, "frames").values())
         self.spr_width, self.spr_height = self.sprite.get_size()
         self.quad_width = self.spr_width // self.total_frames
         self.sprites = [[pygame.Rect(i * self.quad_width, j * self.spr_height // 4, self.quad_width, self.spr_height // 4) for i in range(self.total_frames)] for j in range(4)]
@@ -1618,7 +1667,7 @@ class Koopa:
             self.x += self.speedx
             self.y += self.speedy
             self.speedy += self.gravity
-            self.frame_index = int((self.dt * self.properties["frame_speeds"]["shell"]) % self.properties["frames"]["shell"]) if self.properties["shell_death_anim"] else 0
+            self.frame_index = int((self.dt * get_key(self.properties, "frame_speeds", "shell")) % get_key(self.properties, "frames", "shell")) if get_key(self.properties, "shell_death_anim") else 0
             if self.rect.top >= SCREEN_HEIGHT:
                 enemies.remove(self)
         else:
@@ -1665,7 +1714,7 @@ class Koopa:
                 if self.rect.colliderect(enemy.rect) and self is not enemy:
                     if self.stomped and not self.speedx == 0:
                         enemy.shot(self)
-                        overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, [100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000][self.combo]))
+                        overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, get_key([100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000], self.combo)))
                         if self.combo == 8:
                             for player in players:
                                 player.lives += 1
@@ -1681,7 +1730,7 @@ class Koopa:
 
             self.rect.topleft = (self.x, self.y)
 
-            self.frame_index = int((self.dt * (abs(self.speedx) if self.stomped else 1) * self.properties["frame_speeds"]["shell" if self.stomped else "normal"]) % self.properties["frames"]["shell" if self.stomped else "normal"])
+            self.frame_index = int((self.dt * (abs(self.speedx) if self.stomped else 1) * get_key(self.properties, "frame_speeds", "shell" if self.stomped else "normal")) % get_key(self.properties, "frames", "shell" if self.stomped else "normal"))
 
     def whack_upside_down(self):
         self.speedx = 0
@@ -1726,8 +1775,8 @@ class Koopa:
         return nor((self.y < camera.y + SCREEN_HEIGHT + self.rect.height), (self.y + self.rect.height < camera.y + SCREEN_HEIGHT + self.rect.height))
 
     def draw(self):
-        image = pygame.transform.rotate(self.sprite.subsurface(self.sprites[self.spriteset][self.frame_index + (self.properties["frames"]["normal"] if self.stomped or self.shotted else 0)]), self.angle)
-        image = pygame.transform.flip(image, xor((self.speedx > 0 and not self.shotted), nitpicks["moonwalking_enemies"]), False)
+        image = pygame.transform.rotate(self.sprite.subsurface(get_key(self.sprites, self.spriteset, self.frame_index + (get_key(self.properties, "frames", "normal") if self.stomped or self.shotted else 0))), self.angle)
+        image = pygame.transform.flip(image, xor((self.speedx > 0 and not self.shotted), get_key(nitpicks, "moonwalking_enemies")), False)
         
         image_rect = image.get_rect()
         image_rect.centerx = self.x - camera.x + (self.quad_width // 4)
@@ -1744,30 +1793,30 @@ class Castle:
         self.sprites = [pygame.Rect(0, (self.image_height // 4) * i, self.image_width, (self.image_height // 4)) for i in range(4)]
 
     def draw(self):
-        screen.blit(self.image.subsurface(self.sprites[self.spriteset]), (self.x - camera.x, self.y - camera.y))
+        screen.blit(self.image.subsurface(get_key(self.sprites, self.spriteset)), (self.x - camera.x, self.y - camera.y))
 
 class Player:
-    def __init__(self, x=0, y=0, lives=3, size=0, controls_enabled=True, walk_cutscene=False, player_number=1):
+    def __init__(self, x=0, y=0, lives=3, size=0, controls_enabled=True, walk_cutscene=False, player_number=1, exiting_pipe=False):
         self.properties = get_game_property("character_properties")
-        self.death_anim = self.properties["pre_death_anim_jump"]
-        self.sync_crouch = self.properties["sync_crouch_fall_anim"]
-        self.midair_turn = self.properties["midair_turn"]
-        self.quad_width = self.properties["quad_width"]
-        self.quad_height = self.properties["quad_height"]
-        self.star_duration = self.properties["star_duration"]
-        self.character_data = self.properties["character_data"][player_number]
-        self.frame_group = self.character_data["frames"]
-        self.frame_loops = self.character_data["frame_loops"]
-        self.frame_speeds = self.character_data["frame_speeds"]
-        self.acceleration = self.character_data["acceleration"]
-        self.swim_height = self.character_data["swim_height"]
-        self.max_jump = self.character_data["max_jump"] + 0.5
-        self.color = self.character_data["color"]
+        self.death_anim = get_key(self.properties, "pre_death_anim_jump")
+        self.sync_crouch = get_key(self.properties, "sync_crouch_fall_anim")
+        self.midair_turn = get_key(self.properties, "midair_turn")
+        self.quad_width = get_key(self.properties, "quad_width")
+        self.quad_height = get_key(self.properties, "quad_height")
+        self.star_duration = get_key(self.properties, "star_duration")
+        self.character_data = get_key(self.properties, "character_data", player_number)
+        self.frame_group = get_key(self.character_data, "frames")
+        self.frame_loops = get_key(self.character_data, "frame_loops")
+        self.frame_speeds = get_key(self.character_data, "frame_speeds")
+        self.acceleration = get_key(self.character_data, "acceleration")
+        self.swim_height = get_key(self.character_data, "swim_height")
+        self.max_jump = get_key(self.character_data, "max_jump") + 0.5
+        self.color = get_key(self.character_data, "color")
         self.frame_data = {}
         self.prev_key = 0
         for key in ["idle", "crouch", "crouchfall", "walk", "skid", "jump", "fall", "run", "runjump", "runfall", "dead", "pipe", "climb", "swim", "swimpush", "fire"]:
-            self.frame_data[key] = self.frame_group[key] + self.prev_key
-            self.prev_key = self.frame_data[key]
+            self.frame_data[key] = get_key(self.frame_group, key) + self.prev_key
+            self.prev_key = get_key(self.frame_data, key)
         self.spritesheet = load_sprite(f"p{player_number + 1}")
         self.controls_enabled = controls_enabled
         self.can_control = controls_enabled
@@ -1805,13 +1854,12 @@ class Player:
         self.sprites = [[pygame.Rect(x * self.quad_width, y * self.quad_height, self.quad_width, self.quad_height) for x in range(self.img_width // self.quad_width)] for y in range(self.img_height // self.quad_height)]
         self.size = size
         self.walk_cutscene = walk_cutscene
-        self.controls = [globals()[f"controls{i+1}" if i else "controls"] for i in count_list_items(characters_data)][player_number]
+        self.controls = get_key([get_key(globals(), f"controls{i+1}" if i else "controls") for i in count_list_items(characters_data)], player_number)
         self.skidding = False
         self.gravity = 0.25
         self.min_jump = 0.5
         self.run_timer = 0
         self.update_hitbox()
-        self.rect.y -= self.rect.height - (0 if self.size == 0 else 12)
         self.fall_timer = 0
         self.fall_duration = 0.125
         self.falling = True
@@ -1820,9 +1868,10 @@ class Player:
         self.size_change = []
         self.size_change_timer = 0
         self.old_controls = False
-        self.fire_timer = 0
+        self.fire_timer = 10
         self.fire_duration = 10
         self.fire_lock = False
+        self.fired = False
         self.speed = 0
         self.swim_push_anim = False
         self.lives = lives
@@ -1835,24 +1884,36 @@ class Player:
         self.can_draw = True
         self.stomp_jump = False
         self.stomp_combo = 0
+        self.stomped_enemies = []
         self.star = False
         self.star_timer = 0
         self.star_combo = 0
         self.star_music = False
         self.piping = False
+        self.piping_exit = exiting_pipe
         self.pipe_dir = False
         self.pipe_timer = 0
-        self.pipe_duration = 0.5
+        self.pipe_duration = 1
         self.pipe_speed = 0.75
         self.pipe_marker = None
         self.clear = False
         self.kicked_shell = False
         self.kicked_timer = 0
-        self.kicked_duration = 0.5
-        self.prev_bottom = None
+        self.kicked_duration = 0.25
+        self.prev_bottom = 0
         self.star_trail_timer = 0
         self.star_trail_duration = 0.0625
-        self.update_hitbox()
+        self.full_accel = False
+        self.full_run_accel = False
+        self.min_speedx = 0.25
+        try:
+            for tile in tiles:
+                if tile.top_collide:
+                    if player.rect.bottom == tile.rect.top:
+                        if player.rect.right > tile.rect.left and player.rect.left < tile.rect.right:
+                            self.fall_timer = self.fall_duration
+        except:
+            pass
 
     def add_life(self):
         if nitpicks["infinite_lives"]:
@@ -1872,7 +1933,7 @@ class Player:
     def update(self):
         if self.dead:
             if self.dead_timer == 0:
-                self.gravity = 0.25
+                self.gravity = 0.1875
                 self.speedx = 0
                 self.frame_timer = 0
                 self.piping = False
@@ -1882,7 +1943,7 @@ class Player:
                 self.star_timer = 0
                 self.star_combo = 0
                 self.star_music = False
-                if not nitpicks["infinite_lives"]:
+                if not get_key(nitpicks, "infinite_lives"):
                     self.lives -= 1
                 self.all_dead = everyone_dead
                 if everyone_dead:
@@ -1909,13 +1970,13 @@ class Player:
                     self.respawning = True
         else:
             self.gravity = 0.125 if underwater else 0.25
-            self.left = (keys[self.controls["left"]]) if self.controls_enabled and self.can_control and not self.piping else False
-            self.right = (keys[self.controls["right"]]) if self.controls_enabled and self.can_control and not self.piping else False
-            self.up = (keys[self.controls["up"]]) if self.controls_enabled and self.can_control and not self.piping else False
-            self.down = (keys[self.controls["down"]] if self.fall_timer < self.fall_duration else self.down) if self.controls_enabled and self.can_control and not self.piping else False
-            self.down_key = (keys[self.controls["down"]]) if self.controls_enabled and self.can_control and not self.piping else False
-            self.run = (keys[self.controls["run"]]) if self.controls_enabled and self.can_control and not self.piping else False
-            self.jump = (keys[self.controls["jump"]]) if self.controls_enabled and self.can_control and not self.piping else False
+            self.left = (get_key(keys, get_key(self.controls, "left"))) if self.controls_enabled and self.can_control and not self.piping else False
+            self.right = (get_key(keys, get_key(self.controls, "right"))) if self.controls_enabled and self.can_control and not self.piping else False
+            self.up = (get_key(keys, get_key(self.controls, "up"))) if self.controls_enabled and self.can_control and not self.piping else False
+            self.down_key = (get_key(keys, get_key(self.controls, "down"))) if self.controls_enabled and self.can_control and not self.piping else False
+            self.down = self.down_key if self.fall_timer < self.fall_duration else self.down
+            self.run = (get_key(keys, get_key(self.controls, "run"))) if self.controls_enabled and self.can_control and not self.piping else False
+            self.jump = (get_key(keys, get_key(self.controls, "jump"))) if self.controls_enabled and self.can_control and not self.piping else False
 
             if self.kicked_shell:
                 self.kicked_timer += 1
@@ -1940,8 +2001,8 @@ class Player:
                 self.can_draw = True
 
             for pipe_marker in pipe_markers:
-                if self.rect.colliderect(pipe_marker.rect) and nor(self.piping, self.dead, self.size_change):
-                    if self.down_key and self.rect.bottom + 2 >= pipe_marker.rect.top >= self.rect.bottom - 2 and pipe_marker.rect.left - 5 <= self.rect.x <= pipe_marker.rect.right - 9 and pipe_marker.pipe_dir == "up":
+                if self.rect.colliderect(pipe_marker.rect) and nor(self.piping, self.dead, self.size_change, pipe_marker.exit):
+                    if self.down_key and self.rect.bottom + 2 >= pipe_marker.rect.top >= self.rect.bottom - 2 and pipe_marker.rect.left - 6 <= self.rect.x <= pipe_marker.rect.right - 12 and pipe_marker.pipe_dir == "up":
                         self.speedx = 0
                         self.speedy = self.pipe_speed
                         if self.pipe_marker is None:
@@ -1951,7 +2012,7 @@ class Player:
                             self.piping = True
                             sound_player.play_sound(pipe_sound)
 
-                    elif self.up and self.fall_timer >= self.fall_duration and self.rect.top + 2 >= pipe_marker.rect.bottom >= self.rect.top - 2 and pipe_marker.rect.left - 5 <= self.rect.x <= pipe_marker.rect.right - 9 and pipe_marker.pipe_dir == "down":
+                    elif self.up and self.fall_timer >= self.fall_duration and self.rect.top + 2 >= pipe_marker.rect.bottom >= self.rect.top - 2 and pipe_marker.rect.left - 6 <= self.rect.x <= pipe_marker.rect.right - 12 and pipe_marker.pipe_dir == "down":
                         self.speedx = 0
                         self.speedy = -self.pipe_speed
                         if self.pipe_marker is None:
@@ -1982,29 +2043,61 @@ class Player:
                             sound_player.play_sound(pipe_sound)
 
             if self.piping:
+                self.pipe_timer += 1
                 if self.pipe_timer <= self.pipe_duration * 60:
-                    self.pipe_timer += 1
                     self.rect.y += self.speedy
                     if self.pipe_timer <= self.pipe_duration * 30:
                         self.rect.x += self.speedx
-                if abs(self.speedx) < MIN_SPEEDX:
-                    self.anim_state = self.frame_data["dead"] + ((int(self.pipe_anim_timer * self.frame_speeds["pipe"]) % self.frame_group["pipe"]) if self.frame_loops["pipe"] else min(int(self.pipe_timer * self.frame_speeds["pipe"]), self.frame_group["pipe"] + 1))
+                self.can_draw = self.pipe_timer <= self.pipe_duration * 60
+                if abs(self.speedx) < self.min_speedx:
+                    self.anim_state = get_key(self.frame_data, "dead") + ((int(self.pipe_anim_timer * get_key(self.frame_speeds, "pipe")) % get_key(self.frame_group, "pipe")) if get_key(self.frame_loops, "pipe") else min(int(self.pipe_timer * get_key(self.frame_speeds, "pipe")), get_key(self.frame_group, "pipe") + 1))
                 else:
                     self.frame_timer += abs(self.speedx) / 1.25
-                    self.anim_state = self.frame_data["crouchfall"] + ((int(self.frame_timer * self.frame_speeds["walk"]) % self.frame_group["walk"]) if self.frame_loops["walk"] else min(int(self.frame_timer * self.frame_speeds["walk"]), self.frame_group["walk"] - 1))
+                    self.anim_state = get_key(self.frame_data, "crouchfall") + ((int(self.frame_timer * get_key(self.frame_speeds, "walk")) % get_key(self.frame_group, "walk")) if get_key(self.frame_loops, "walk") else min(int(self.frame_timer * get_key(self.frame_speeds, "walk")), get_key(self.frame_group, "walk") - 1))
                 return
 
-            self.speed = lerp(self.speed, WALK_SPEED if underwater else ((RUN_SPEED * (1.25 if self.pspeed else 1) if self.run else WALK_SPEED) * (1.25 if self.star else 1)), 0.125)
+            if self.piping_exit:
+                self.pipe_timer += 1
+                if self.pipe_timer <= self.pipe_duration * 60:
+                    self.rect.y += self.speedy
+                    if self.pipe_timer <= self.pipe_duration * 30:
+                        self.rect.x += self.speedx
+                else:
+                    self.pipe_timer = 0
+                    self.piping_exit = False
+                if abs(self.speedx) < self.min_speedx:
+                    self.anim_state = get_key(self.frame_data, "dead") + ((int(self.pipe_anim_timer * get_key(self.frame_speeds, "pipe")) % get_key(self.frame_group, "pipe")) if get_key(self.frame_loops, "pipe") else min(int(self.pipe_timer * get_key(self.frame_speeds, "pipe")), get_key(self.frame_group, "pipe") + 1))
+                else:
+                    self.frame_timer += abs(self.speedx) / 1.25
+                    self.anim_state = get_key(self.frame_data, "crouchfall") + ((int(self.frame_timer * get_key(self.frame_speeds, "walk")) % get_key(self.frame_group, "walk")) if get_key(self.frame_loops, "walk") else min(int(self.frame_timer * get_key(self.frame_speeds, "walk")), get_key(self.frame_group, "walk") - 1))
+                return
+
+            if WALK_SPEED * 0.875 <= floor(abs(self.speedx) * 10) / 10 <= WALK_SPEED and not self.full_accel:
+                self.run = True
+                self.speed = WALK_SPEED
+                self.speedx = WALK_SPEED * is_negative(self.speedx)
+                self.full_accel = True
+
+            if RUN_SPEED * 0.875 <= floor(abs(self.speedx) * 10) / 10 <= RUN_SPEED and self.run and not self.full_run_accel:
+                self.speed = RUN_SPEED
+                self.speedx = RUN_SPEED * is_negative(self.speedx)
+                self.full_run_accel = True
+
+            if not self.run:
+                self.full_run_accel = False
+
+            self.speed = round(lerp(self.speed, WALK_SPEED if underwater else ((RUN_SPEED * (1.25 if self.pspeed else 1) if self.run else WALK_SPEED) * (1.25 if self.star else 1)), 0.125) * 10) / 10
 
             self.run_lock = self.run and not self.prev_run
             self.jump_lock = self.jump and not self.prev_jump
 
-            if self.size == 2 and len(fireballs_table[str(self.player_number)]) < max_fireballs and not self.down:
+            if self.size == 2 and not self.down:
                 if self.run:
                     if self.fire_timer < self.fire_duration:
-                        if self.fire_timer == 0:
+                        if self.fire_timer == 0 and len(get_key(fireballs_table, str(self.player_number))) < max_fireballs:
                             sound_player.play_sound(fireball_sound)
-                            fireballs_table[str(self.player_number)].append(Fireball(self))
+                            get_key(fireballs_table, str(self.player_number)).append(Fireball(self))
+                            self.fired = True
                         self.fire_timer += 1
                         if self.fire_timer == self.fire_duration:
                             self.fire_lock = True
@@ -2014,9 +2107,11 @@ class Player:
                     else:
                         self.fire_timer = 0
                         self.fire_lock = False
+                        self.fired = False
                 elif self.fire_timer == self.fire_duration:
                     self.fire_timer = 0
                     self.fire_lock = False
+                    self.fired = False
             else:
                 self.fire_timer = self.fire_duration
 
@@ -2027,7 +2122,7 @@ class Player:
                     self.speedx *= (1 - self.acceleration)
                 else:
                     if self.left and not self.right:
-                        self.speedx = max(self.speedx - self.acceleration, -(self.speed + self.acceleration) / (1.625 if underwater else 1))
+                        self.speedx = max(self.speedx - self.acceleration, -self.speed / (1.625 if underwater else 1))
                         self.facing_right = False
                     elif self.right and not self.left:
                         self.speedx = min(self.speedx + self.acceleration, self.speed / (1.625 if underwater else 1))
@@ -2035,20 +2130,40 @@ class Player:
                     else:
                         if not self.walk_cutscene:
                             self.speedx *= (1 - self.acceleration)
-                            if abs(self.speedx) < MIN_SPEEDX:
+                            if abs(self.speedx) < self.min_speedx:
                                 self.speedx = 0
             else:
                 if self.left and not self.right:
-                    self.speedx = max(self.speedx - self.acceleration, -(self.speed + self.acceleration))
+                    self.speedx = max(self.speedx - self.acceleration, -self.speed / (1.625 if underwater else 1))
                     if self.midair_turn or underwater:
                         self.facing_right = False
                 elif self.right and not self.left:
-                    self.speedx = min(self.speedx + self.acceleration, self.speed)
+                    self.speedx = min(self.speedx + self.acceleration, self.speed / (1.625 if underwater else 1))
                     if self.midair_turn or underwater:
                         self.facing_right = True
 
-            if not self.run and self.speedx > WALK_SPEED:
-                self.speedx = max(self.speedx - self.acceleration, WALK_SPEED)
+            self.speedx = range_number(self.speedx, -self.speed, self.speed)
+            
+            self.new_rect = self.rect.copy()
+            self.new_rect.x += self.speedx
+
+            for tile in tiles:
+                if tile.broken:
+                    continue
+                if self.new_rect.colliderect(tile.rect):
+                    if self.speedx > self.min_speedx and tile.left_collide and abs(self.rect.right - tile.rect.left) < 4:
+                        self.rect.right = tile.rect.left
+                        self.speedx = 0
+                    elif self.speedx < self.min_speedx and tile.right_collide and abs(self.rect.left - tile.rect.right) < 4:
+                        self.rect.left = tile.rect.right
+                        self.speedx = 0
+                    break
+
+            self.rect.x += self.speedx
+            self.rect.y += self.speedy
+            self.on_ground = False
+
+            self.speedy = min(self.speedy, 2.5 if underwater else 5)
 
             if underwater:
                 if self.jump and self.jump_timer == 0:
@@ -2087,12 +2202,9 @@ class Player:
 
             if self.can_control:
                 if self.fall_timer < self.fall_duration and self.controls_enabled:
-                    if ceil(abs(self.speedx) * 1000) / 1000 >= RUN_SPEED:
-                        self.run_timer = range_number(self.run_timer + (3 if self.star else 1), MIN_RUN_TIMER, MAX_RUN_TIMER)
-                    else:
-                        self.run_timer = range_number(self.run_timer - (3 if self.star else 0.5), MIN_RUN_TIMER, MAX_RUN_TIMER)
+                    self.run_timer = range_number(self.run_timer + ((2 if self.star else 1) if ceil(abs(self.speedx) * 1000) / 1000 >= RUN_SPEED else -(2 if self.star else 0.5)), MIN_RUN_TIMER, MAX_RUN_TIMER)
                 elif not self.run_timer == MAX_RUN_TIMER:
-                    self.run_timer = range_number(self.run_timer - (3 if self.star else 0.5), MIN_RUN_TIMER, MAX_RUN_TIMER)
+                    self.run_timer = range_number(self.run_timer - (2 if self.star else 0.5), MIN_RUN_TIMER, MAX_RUN_TIMER)
 
             if self.rect.left <= camera.x:
                 self.rect.left = camera.x
@@ -2103,27 +2215,6 @@ class Player:
                 self.rect.right = camera.x + SCREEN_WIDTH
                 if self.rect.x >= camera.x + SCREEN_WIDTH - self.rect.width and ((self.speedx > 0 and self.facing_right) or (self.speedx > 0 and not self.facing_right)):
                     self.speedx = 0
-
-            new_rect = self.rect.copy()
-            new_rect.x += self.speedx
-
-            for tile in tiles:
-                if tile.broken:
-                    continue
-                if new_rect.colliderect(tile.rect):
-                    if self.speedx > 0 and tile.left_collide:
-                        self.rect.right = tile.rect.left
-                        self.speedx = 0
-                    elif self.speedx < 0 and tile.right_collide:
-                        self.rect.left = tile.rect.right
-                        self.speedx = 0
-                    break
-
-            self.rect.x += self.speedx
-            self.rect.y += self.speedy
-            self.on_ground = False
-
-            self.speedy = min(self.speedy, 2.5 if underwater else 5)
 
             if self.size_change:
                 if self.can_control:
@@ -2187,111 +2278,55 @@ class Player:
                 if self.rect.colliderect(enemy.rect) and not self.size_change:
                     if self.star:
                         enemy.shot(self)
-                        overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, [100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000][self.star_combo]))
-                        if self.star_combo == 8:
-                            self.add_life()
+                        overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, get_key([100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000], self.star_combo)))
+                        if self.star_combo == 8: self.add_life()
                         self.star_combo = min(self.star_combo + 1, 8)
                         sound_player.play_sound(shot_sound, ((self.star_combo - 1) * 2) if get_game_property("pitch_shot_sound") else 0)
-                    else:
-                        if isinstance(enemy, Koopa):
-                            if self.speedy > 0 and self.rect.bottom - enemy.rect.top < 8:
-                                if not enemy.stomped:
-                                    enemy.stomp()
-                                    overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, [100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000][self.stomp_combo]))
-                                    if self.stomp_combo == 8:
-                                        self.add_life()
-                                    sound_player.play_sound(stomp_sound, self.stomp_combo if get_game_property("pitch_stomp_sound") else 0)
-                                    self.stomp_combo = min(self.stomp_combo + 1, 8)
-                                    self.stomp_jump = True
-                                    self.speedy = -self.max_jump
-                                    self.jump_timer = 1
-                                    self.on_ground = False
-                                    self.fall_timer = self.fall_duration
-
-                                elif enemy.speedx == 0:
-                                    self.kicked_shell = True
-                                    if self.rect.centerx < enemy.rect.centerx:
-                                        enemy.speedx = enemy.shell_speed
-                                    else:
-                                        enemy.speedx = -enemy.shell_speed
-                                    overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y))
-                                    sound_player.play_sound(shot_sound)
-
-                                elif not self.kicked_shell:
-                                    if self.rect.right > enemy.rect.left and self.rect.left < enemy.rect.right:
-                                        if self.speedy > 0 and self.rect.bottom - enemy.rect.top < 8:
-                                            enemy.stomp()
-                                            overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, [100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000][self.stomp_combo]))
-                                            if self.stomp_combo == 8:
-                                                self.add_life()
-                                            sound_player.play_sound(stomp_sound, self.stomp_combo if get_game_property("pitch_stomp_sound") else 0)
-                                            self.stomp_combo = min(self.stomp_combo + 1, 8)
-                                            self.stomp_jump = True
-                                            self.speedy = -self.max_jump
-                                            self.jump_timer = 1
-                                            self.on_ground = False
-                                            self.fall_timer = self.fall_duration
-                                        elif not self.shrunk:
-                                            if self.size == 0:
-                                                self.dead = True
-                                            else:
-                                                self.shrunk = True
-                                                target_size = 0 if nitpicks["classic_powerdown"] else self.size - 1
-                                                self.size_change_timer = 0
-                                                self.size_change = [target_size, self.size, target_size, self.size, target_size, self.size, target_size]
-                                                sound_player.play_sound(shrink_sound)
-
-                            elif self.on_ground:
-                                if self.rect.right > enemy.rect.left and self.rect.left < enemy.rect.right:
-                                    if enemy.speedx == 0:
-                                        if self.rect.centerx < enemy.rect.centerx:
-                                            enemy.speedx = enemy.shell_speed + (self.speedx * 0.25)
-                                        else:
-                                            enemy.speedx = -(enemy.shell_speed + (self.speedx * 0.25))
-                                        overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y))
-                                        sound_player.play_sound(shot_sound)
-                                    else:
-                                        if self.kicked_timer == 0 and not self.shrunk:
-                                            if self.size == 0:
-                                                self.dead = True
-                                            else:
-                                                self.shrunk = True
-                                                target_size = 0 if nitpicks["classic_powerdown"] else self.size - 1
-                                                self.size_change_timer = 0
-                                                self.size_change = [target_size, self.size, target_size, self.size, target_size, self.size, target_size]
-                                                sound_player.play_sound(shrink_sound)
-
-                            elif self.speedy < 0 and self.rect.top - enemy.rect.bottom < 8 and enemy.speedx == 0:
-                                self.kicked_shell = True
-                                if self.rect.centerx < enemy.rect.centerx:
-                                    enemy.speedx = enemy.shell_speed
-                                else:
-                                    enemy.speedx = -enemy.shell_speed
-                                overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y))
-                                sound_player.play_sound(shot_sound)
-
-                        elif isinstance(enemy, Goomba) and self.speedy > 0 and self.rect.bottom - enemy.rect.top < 8:
-                            enemy.stomp()
-                            self.stomp_jump = True
-                            self.speedy = -self.max_jump
-                            self.jump_timer = 1
-                            self.on_ground = False
-                            self.fall_timer = self.fall_duration
-                            overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, [100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000][self.stomp_combo]))
-                            if self.stomp_combo == 8:
-                                self.add_life()
-                            sound_player.play_sound(stomp_sound, self.stomp_combo if get_game_property("pitch_stomp_sound") else 0)
-                            self.stomp_combo = min(self.stomp_combo + 1, 8)
-
-                        elif not self.shrunk:
+                    elif self.speedy > 0 and self.rect.bottom - enemy.rect.top < 8 and not enemy.stomped:
+                        self.stomped_enemies.append(enemy)
+                    elif isinstance(enemy, Koopa):
+                        if enemy.speedx == 0 and self.on_ground and self.rect.right > enemy.rect.left and self.rect.left < enemy.rect.right:
+                            enemy.speedx = enemy.shell_speed + (self.speedx * 0.25) if self.rect.centerx < enemy.rect.centerx else -(enemy.shell_speed + (self.speedx * 0.25))
+                            overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y))
+                            sound_player.play_sound(shot_sound)
+                        elif enemy.speedx != 0 and self.on_ground and self.kicked_timer == 0 and not self.shrunk:
                             if self.size == 0:
                                 self.dead = True
                             else:
                                 self.shrunk = True
-                                target_size = 0 if nitpicks["classic_powerdown"] else self.size - 1
+                                target_size = 0 if get_key(nitpicks, "classic_powerdown") else self.size - 1
                                 self.size_change_timer = 0
                                 self.size_change = [target_size, self.size, target_size, self.size, target_size, self.size, target_size]
                                 sound_player.play_sound(shrink_sound)
+                        elif self.fall_timer >= self.fall_duration and self.rect.top - enemy.rect.bottom < 8 and enemy.speedx == 0:
+                            self.kicked_shell = True
+                            enemy.speedx = enemy.shell_speed if self.rect.centerx < enemy.rect.centerx else -enemy.shell_speed
+                            overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y))
+                            sound_player.play_sound(shot_sound)
+                    elif not self.shrunk:
+                        if self.size == 0:
+                            self.dead = True
+                        else:
+                            self.shrunk = True
+                            target_size = 0 if get_key(nitpicks, "classic_powerdown") else self.size - 1
+                            self.size_change_timer = 0
+                            self.size_change = [target_size, self.size, target_size, self.size, target_size, self.size, target_size]
+                            sound_player.play_sound(shrink_sound)
+
+            if self.stomped_enemies:
+                for enemy in self.stomped_enemies:
+                    enemy.stomp()
+                    overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y, get_key([100, 200, 400, 800, 1000, 2000, 4000, 8000, 10000], self.stomp_combo)))
+                    self.stomped_enemies.remove(enemy)
+                if self.stomp_combo == 8:
+                    self.add_life()
+                sound_player.play_sound(stomp_sound, self.stomp_combo if get_game_property("pitch_stomp_sound") else 0)
+                self.stomp_combo = min(self.stomp_combo + 1, 8)
+                self.stomp_jump = True
+                self.speedy = -self.max_jump / (2 if underwater else 1)
+                self.jump_timer = 1
+                self.on_ground = False
+                self.fall_timer = self.fall_duration
 
             for item in items:
                 if self.rect.colliderect(item.rect) and nor(item.sprouting, isinstance(item, CoinAnimation)):
@@ -2324,16 +2359,14 @@ class Player:
 
             if self.rect.top >= (y_range or SCREEN_HEIGHT):
                 self.dead = True
-                self.rect.y = y_range + 80
+                self.can_draw = False
 
-            self.skidding = (self.fall_timer < self.fall_duration and ((self.speedx < 0 and self.facing_right and self.right and not self.left) or (self.speedx > 0 and not self.facing_right and self.left and not self.right)) and nor(self.down, 0 <= self.anim_state <= self.frame_data["idle"], abs(self.speedx) < MIN_SPEEDX))
+            self.skidding = (self.fall_timer < self.fall_duration and ((self.speedx < 0 and self.facing_right and self.right and not self.left) or (self.speedx > 0 and not self.facing_right and self.left and not self.right)) and nor(self.down, 0 <= self.anim_state <= get_key(self.frame_data, "idle"), abs(self.speedx) < self.min_speedx))
 
             if self.on_ground:
                 self.speedy = 0
                 self.fall_timer = 0
                 self.falling = True
-                if abs(self.speedx) > WALK_SPEED:
-                    self.speedx = max(self.speedx - self.acceleration, WALK_SPEED) if self.speedx > 0 else min(self.speedx + self.acceleration, -WALK_SPEED)
             else:
                 if not self.size_change:
                     self.speedy += self.gravity * (2 if self.fall_timer >= self.fall_duration and nor(self.jump, underwater) else 1)
@@ -2348,56 +2381,61 @@ class Player:
         self.star_trail_timer = (self.star_trail_timer + 1) if self.star else 0
 
         self.falling_condition = self.speedy > 0 and self.fall_timer >= self.fall_duration
+        self.crouch_falling = self.down and self.falling_condition and get_key(self.frame_group, "crouchfall") != 0
 
-        self.crouch_timer = (self.crouch_timer + 1) if self.down and (self.sync_crouch and not self.falling_condition) else 0
-        self.crouch_fall_timer = (self.crouch_fall_timer + 1) if self.down and self.falling_condition else 0
+        self.crouch_timer = (self.crouch_timer + 1) if self.down and (self.sync_crouch and not self.falling_condition) and get_key(self.frame_group, "crouchfall") == 0 else 0
+        self.crouch_fall_timer = (self.crouch_fall_timer + 1) if self.down and self.falling_condition and get_key(self.frame_group, "crouchfall") != 0 else 0
         self.pipe_anim_timer = (self.pipe_anim_timer + 1) if self.piping else 0
         self.skid_timer = (self.skid_timer + 1) if self.skidding else 0
         self.jumping_timer = (self.jumping_timer + 1) if self.speedy < 0 and self.fall_timer >= self.fall_duration else 0
         self.falling_timer = (self.falling_timer + 1) if self.falling_condition else 0
-        self.idle_timer = (self.idle_timer + 1) if abs(self.speedx) < MIN_SPEEDX else 0
+        self.idle_timer = (self.idle_timer + 1) if abs(self.speedx) < self.min_speedx else 0
         self.swimming_timer = (self.swimming_timer + 1) if self.fall_timer >= self.fall_duration and underwater else 0
         self.swimpushing_timer = (self.swimpushing_timer + 1) if self.fall_timer >= self.fall_duration and underwater and self.swim_push_anim else 0
 
         if self.dead:
             self.frame_timer += 1 if self.dead_timer >= 30 and not self.death_anim else 0
-            self.anim_state = self.frame_data["runfall"] + ((int(self.frame_timer * self.frame_speeds["dead"]) % self.frame_group["dead"]) if self.frame_loops["dead"] else min(int(self.frame_timer * self.frame_speeds["dead"]), self.frame_group["dead"] - 1))
-        elif self.size == 2 and 0 < self.fire_timer < self.fire_duration and not self.fire_lock:
-            self.anim_state = self.frame_data["swimpush"] + int((self.fire_timer * self.frame_group["fire"]) / self.fire_duration)
+            self.anim_state = get_key(self.frame_data, "runfall") + ((int(self.frame_timer * get_key(self.frame_speeds, "dead")) % get_key(self.frame_group, "dead")) if get_key(self.frame_loops, "dead") else min(int(self.frame_timer * get_key(self.frame_speeds, "dead")), get_key(self.frame_group, "dead") - 1))
+        elif self.size == 2 and 0 < self.fire_timer < self.fire_duration and self.fired and not self.fire_lock:
+            self.anim_state = get_key(self.frame_data, "swimpush") + int((self.fire_timer * get_key(self.frame_group, "fire")) / self.fire_duration)
             self.frame_timer = 0
         elif self.down:
-            self.anim_state = self.frame_data["crouch" if self.falling_condition else "idle"] + ((int(((self.crouch_fall_timer if self.falling_condition else self.crouch_timer) if self.sync_crouch else self.crouch_timer) * self.frame_speeds["crouchfall" if self.falling_condition else "crouch"]) % self.frame_group["crouchfall" if self.falling_condition else "crouch"]) if self.frame_loops["crouchfall" if self.falling_condition else "crouch"] else min(int(((self.crouch_fall_timer if self.falling_condition else self.crouch_timer) if self.sync_crouch else self.crouch_timer) * self.frame_speeds["crouchfall" if self.falling_condition else "crouch"]), self.frame_group["crouchfall" if self.falling_condition else "crouch"] - 1))
+            self.anim_state = get_key(self.frame_data, "crouch" if self.crouch_falling else "idle") + ((int(((self.crouch_fall_timer if self.crouch_falling else self.crouch_timer) if self.sync_crouch else self.crouch_timer) * get_key(self.frame_speeds, "crouchfall" if self.crouch_falling else "crouch")) % get_key(self.frame_group, "crouchfall" if self.crouch_falling else "crouch")) if get_key(self.frame_loops, "crouchfall" if self.crouch_falling else "crouch") else min(int(((self.crouch_fall_timer if self.crouch_falling else self.crouch_timer) if self.sync_crouch else self.crouch_timer) * get_key(self.frame_speeds, "crouchfall" if self.crouch_falling else "crouch")), get_key(self.frame_group, "crouchfall" if self.crouch_falling else "crouch") - 1))
             self.frame_timer = 0
         elif self.skidding:
-            self.anim_state = self.frame_data["walk"] + ((int(self.skid_timer * self.frame_speeds["skid"]) % self.frame_group["skid"]) if self.frame_loops["skid"] else min(int(self.skid_timer * self.frame_speeds["skid"]), self.frame_group["skid"] - 1))
+            self.anim_state = get_key(self.frame_data, "walk") + ((int(self.skid_timer * get_key(self.frame_speeds, "skid")) % get_key(self.frame_group, "skid")) if get_key(self.frame_loops, "skid") else min(int(self.skid_timer * get_key(self.frame_speeds, "skid")), get_key(self.frame_group, "skid") - 1))
             self.frame_timer = 0
         elif self.fall_timer >= self.fall_duration and underwater:
-            self.anim_state = self.frame_data["swim" if self.swim_push_anim else "climb"] + ((int((self.swimpushing_timer if self.swim_push_anim else self.swimming_timer) * self.frame_speeds["swimpush" if self.swim_push_anim else "swim"]) % self.frame_group["swimpush" if self.swim_push_anim else "swim"]) if self.frame_loops["swimpush" if self.swim_push_anim else "swim"] else min(int((self.swimpushing_timer if self.swim_push_anim else self.swimming_timer) * self.frame_speeds["swimpush" if self.swim_push_anim else "swim"]), self.frame_group["swimpush" if self.swim_push_anim else "swim"] - 1))
-            if self.anim_state >= self.frame_data["swimpush"] - 1:
+            self.anim_state = get_key(self.frame_data, "swim" if self.swim_push_anim else "climb") + ((int((self.swimpushing_timer if self.swim_push_anim else self.swimming_timer) * get_key(self.frame_speeds, "swimpush" if self.swim_push_anim else "swim")) % get_key(self.frame_group, "swimpush" if self.swim_push_anim else "swim")) if get_key(self.frame_loops, "swimpush" if self.swim_push_anim else "swim") else min(int((self.swimpushing_timer if self.swim_push_anim else self.swimming_timer) * get_key(self.frame_speeds, "swimpush" if self.swim_push_anim else "swim")), get_key(self.frame_group, "swimpush" if self.swim_push_anim else "swim") - 1))
+            self.frame_timer = 0
+            if self.anim_state >= get_key(self.frame_data, "swimpush") - 1:
                 self.swim_push_anim = False
-            self.frame_timer = 0
         elif self.speedy < 0 and not underwater:
-            self.anim_state = self.frame_data["run" if self.pspeed else "skid"] + ((int(self.jumping_timer * self.frame_speeds["runjump" if self.pspeed else "jump"]) % self.frame_group["runjump" if self.pspeed else "jump"]) if self.frame_loops["runjump" if self.pspeed else "jump"] else min(int(self.jumping_timer * self.frame_speeds["runjump" if self.pspeed else "jump"]), self.frame_group["runjump" if self.pspeed else "jump"] - 1))
+            self.anim_state = get_key(self.frame_data, "run" if self.pspeed else "skid") + ((int(self.jumping_timer * get_key(self.frame_speeds, "runjump" if self.pspeed else "jump")) % get_key(self.frame_group, "runjump" if self.pspeed else "jump")) if get_key(self.frame_loops, "runjump" if self.pspeed else "jump") else min(int(self.jumping_timer * get_key(self.frame_speeds, "runjump" if self.pspeed else "jump")), get_key(self.frame_group, "runjump" if self.pspeed else "jump") - 1))
             self.frame_timer = 0
-        elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.down, underwater):
-            self.anim_state = self.frame_data["runjump" if self.pspeed else "jump"] + ((int(self.falling_timer * self.frame_speeds["runfall" if self.pspeed else "fall"]) % self.frame_group["runfall" if self.pspeed else "fall"]) if self.frame_loops["runfall" if self.pspeed else "fall"] else min(int(self.falling_timer * self.frame_speeds["runfall" if self.pspeed else "fall"]), self.frame_group["runfall" if self.pspeed else "fall"] - 1))
+        elif get_key(self.frame_group, "runfall" if self.pspeed else "fall") == 0 and self.fall_timer >= self.fall_duration:
+            if get_key(self.frame_data, "walk") <= self.anim_state <= get_key(self.frame_data, "skid") - 1 or (get_key(self.frame_data, "swimpush") <= self.anim_state <= get_key(self.frame_data, "fire") - 1 and self.fire_lock) or 0 <= self.anim_state <= get_key(self.frame_data, "crouch") - 1:
+                self.anim_state = get_key(self.frame_data, "crouch")
+        elif self.speedy > 0 and self.fall_timer >= self.fall_duration and nor(self.on_ground, self.down, underwater, get_key(self.frame_group, "runfall" if self.pspeed else "fall") == 0):
+            self.anim_state = get_key(self.frame_data, "runjump" if self.pspeed else "jump") + ((int(self.falling_timer * get_key(self.frame_speeds, "runfall" if self.pspeed else "fall")) % get_key(self.frame_group, "runfall" if self.pspeed else "fall")) if get_key(self.frame_loops, "runfall" if self.pspeed else "fall") else min(int(self.falling_timer * get_key(self.frame_speeds, "runfall" if self.pspeed else "fall")), get_key(self.frame_group, "runfall" if self.pspeed else "fall") - 1))
             self.frame_timer = 0
-        elif abs(self.speedx) < MIN_SPEEDX and self.on_ground:
-            self.anim_state = (int(self.idle_timer * self.frame_speeds["idle"]) % self.frame_group["idle"]) if self.frame_loops["idle"] else min(int(self.idle_timer * self.frame_speeds["idle"]), self.frame_group["idle"] - 1)
+        elif abs(self.speedx) < self.min_speedx and self.on_ground:
+            self.anim_state = (int(self.idle_timer * get_key(self.frame_speeds, "idle")) % get_key(self.frame_group, "idle")) if get_key(self.frame_loops, "idle") else min(int(self.idle_timer * get_key(self.frame_speeds, "idle")), get_key(self.frame_group, "idle") - 1)
             self.frame_timer = 0
-        elif abs(self.speedx) > MIN_SPEEDX * 2 and self.fall_timer < self.fall_duration and not self.pspeed:
+        elif abs(self.speedx) > self.min_speedx * 2 and self.fall_timer < self.fall_duration and not self.pspeed:
             self.frame_timer += abs(self.speedx) / 1.25
-            self.anim_state = self.frame_data["crouchfall"] + ((int(self.frame_timer * self.frame_speeds["walk"]) % self.frame_group["walk"]) if self.frame_loops["walk"] else min(int(self.frame_timer * self.frame_speeds["walk"]), self.frame_group["walk"] - 1))
+            self.anim_state = get_key(self.frame_data, "crouchfall") + ((int(self.frame_timer * get_key(self.frame_speeds, "walk")) % get_key(self.frame_group, "walk")) if get_key(self.frame_loops, "walk") else min(int(self.frame_timer * get_key(self.frame_speeds, "walk")), get_key(self.frame_group, "walk") - 1))
         elif self.pspeed and self.fall_timer < self.fall_duration:
             self.frame_timer += abs(self.speedx) / 1.25
-            self.anim_state = self.frame_data["fall"] + ((int(self.frame_timer * self.frame_speeds["run"]) % self.frame_group["run"]) if self.frame_loops["run"] else min(int(self.frame_timer * self.frame_speeds["run"]), self.frame_group["run"] - 1))
+            self.anim_state = get_key(self.frame_data, "fall") + ((int(self.frame_timer * get_key(self.frame_speeds, "run")) % get_key(self.frame_group, "run")) if get_key(self.frame_loops, "run") else min(int(self.frame_timer * get_key(self.frame_speeds, "run")), get_key(self.frame_group, "run") - 1))
 
         self.rect.x = range_number(self.rect.x, 0, camera.x + SCREEN_WIDTH)
 
     def draw(self):
         if self.can_draw:
-            sprite = self.spritesheet.subsurface(self.sprites[self.size][self.anim_state])
-            sprite = pygame.transform.flip(sprite, xor((not self.facing_right), nitpicks["moonwalking_mario"]), False)
+            sprite = self.spritesheet.subsurface(get_key(self.sprites, self.size, self.anim_state))
+
+            sprite = pygame.transform.flip(sprite, xor((not self.facing_right), get_key(nitpicks, "moonwalking_mario")), False)
             draw_x = self.rect.x - camera.x - ((self.quad_width - self.rect.width) / 2)
             draw_y = self.rect.y - camera.y + self.rect.height - self.quad_height + 1
             screen.blit(sprite, (draw_x, draw_y))
@@ -2518,7 +2556,8 @@ nitpicks_list = [
     "play_music_in_pause",
     "non-progressive_powerups",
     "always_underwater",
-    "hide_course_name"
+    "hide_course_name",
+    "dont_reset_size"
 ]
 
 if exists(load_local_file("nitpicks.json")):
@@ -2536,15 +2575,24 @@ with open(load_local_file("nitpicks.json"), "w") as nitpicks:
 
 nitpicks = load_json("nitpicks")
 
+if exists(load_local_file("settings.json")) and not getsize(load_local_file("settings.json")) == 0:
+    mus_vol = load_json("settings", "mus_vol")
+    snd_vol = load_json("settings", "snd_vol")
+    fullscreen = load_json("settings", "fullscreen")
+
+    for key in load_json("settings"):
+        if key.startswith("controls"):
+            globals()[key] = load_json("settings", key)
+
 running = True
 centerx = SCREEN_WIDTH / 2
 centery = SCREEN_HEIGHT / 2
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.RESIZABLE | (pygame.FULLSCREEN if fullscreen else 0))
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | (pygame.FULLSCREEN if fullscreen else 0))
 clock = pygame.time.Clock()
 pygame.display.set_icon(pygame.image.load(load_asset("icon.ico")))
-pygame.display.set_caption(f"Super Mario Bros. for Python (FPS: {round(clock.get_fps())})" if nitpicks["show_fps"] else "Super Mario Bros. for Python")
+pygame.display.set_caption(f"Super Mario Bros. for Python (FPS: {round(clock.get_fps())})" if get_key(nitpicks, "show_fps") else "Super Mario Bros. for Python")
 player_dist = 20
-intro_players = [Player(x=centerx - player_dist / 2 + player_dist * i, y=SCREEN_HEIGHT, controls_enabled=False, size=1, player_number=i) for i in count_list_items(characters_name)]
+intro_players = [Player(x=centerx - player_dist / 2 + player_dist * i, y=SCREEN_HEIGHT, controls_enabled=False, size=1, player_number=i, walk_cutscene=True) for i in count_list_items(characters_name)]
 players = []
 camera = Camera(get_game_property("camera_smoothness"))
 bgm_player = BGMPlayer()
@@ -2573,12 +2621,14 @@ score = 0
 time = 0
 game_time = 0
 pipe_wait_timer = 0
+show_course_name = False
+show_progress_bar = False
 course_name = None
 progress_bar = None
 castle = None
 flagpole = None
-x_range = None
-y_range = None
+x_range = 40
+y_range = 0
 spawnposx = None
 spawnposy = None
 main_music = None
@@ -2595,15 +2645,6 @@ invertvertical = False
 inverthorizontal = False
 fade_in = False
 fade_out = False
-
-if exists(load_local_file("settings.json")) and not getsize(load_local_file("settings.json")) == 0:
-    mus_vol = load_json("settings", "mus_vol")
-    snd_vol = load_json("settings", "snd_vol")
-    fullscreen = load_json("settings", "fullscreen")
-
-    for key in load_json("settings"):
-        if key.startswith("controls"):
-            globals()[key] = load_json("settings", key)
 
 players_ready = 1
 players_controls = 1
@@ -2631,13 +2672,13 @@ current_bind = False
 game_ready = False
 exit_ready = False
 reset_ready = False
+pipe_ready = False
 underwater = False
 game = False
 everyone_dead = False
-numerical_change = 0.05
 pause = False
 coins = 0
-max_fireballs = infinity if nitpicks["infinite_fireballs"] else 2
+max_fireballs = infinity if get_key(nitpicks, "infinite_fireballs") else 2
 game_over = False
 fast_music = False
 
@@ -2645,15 +2686,15 @@ while running:
     bgm_player.set_volume(mus_vol)
     sound_player.set_volume(snd_vol)
     SCREEN_WIDTH, SCREEN_HEIGHT = pygame.display.get_surface().get_size()
-    pygame.display.set_caption(f"Super Mario Bros. for Python (FPS: {round(clock.get_fps())})" if nitpicks["show_fps"] else "Super Mario Bros. for Python")
+    pygame.display.set_caption(f"Super Mario Bros. for Python (FPS: {round(clock.get_fps())})" if get_key(nitpicks, "show_fps") else "Super Mario Bros. for Python")
     current_fps = FPS if clock.get_fps() == 0 else clock.get_fps()
     screen.fill((0, 0, 0))
     keys = pygame.key.get_pressed()
     
-    controls_table = [globals()[f"controls{i+1}" if i else "controls"] for i in count_list_items(characters_data)]
+    controls_table = [get_key(globals(), f"controls{i+1}" if i else "controls") for i in count_list_items(characters_data)]
 
-    mus_vol = round(range_number(mus_vol, 0, 1) * (1 / numerical_change)) / (1 / numerical_change)
-    snd_vol = round(range_number(snd_vol, 0, 1) * (1 / numerical_change)) / (1 / numerical_change)
+    mus_vol = round(range_number(mus_vol, 0, 1) * 20) / 20
+    snd_vol = round(range_number(snd_vol, 0, 1) * 20) / 20
     players_ready = range_number(players_ready, 1, len(characters_data))
     players_controls = range_number(players_controls, 1, len(characters_data))
     selected_course_pack = range_number(selected_course_pack, 0 if len(get_folders("courses")) == 0 else 1, len(get_folders("courses")))
@@ -2674,7 +2715,7 @@ while running:
             {
                 "mus_vol": mus_vol,
                 "snd_vol": snd_vol,
-                **{f"controls{'' if i == 0 else i+1}": controls_table[i] for i in count_list_items(characters_data)},
+                **{f"controls{'' if i == 0 else i+1}": get_key(controls_table, i) for i in count_list_items(characters_data)},
                 "fullscreen": fullscreen,
                 "fps": FPS,
                 "asset_directory": asset_directory,
@@ -2686,16 +2727,10 @@ while running:
         reload_data()
         sound_player.play_sound(coin_sound)
         title_ground.sprite = split_image(load_sprite("tiles_ground"), 8, 6)
-        text.font = pygame.font.Font(load_asset("font.ttf"), text.font_size)
-        logo.spritesheet = load_sprite("logo")
         camera.x = 0
         camera.y = 0
-        pygame.display.set_icon(pygame.image.load(load_asset("icon.ico")))
-        intro_players = [Player(x=centerx - player_dist / 2 + player_dist * i, y=SCREEN_HEIGHT, controls_enabled=False, size=1, player_number=i) for i in count_list_items(characters_name)]
+        intro_players = [Player(x=centerx - player_dist / 2 + player_dist * i, y=SCREEN_HEIGHT, controls_enabled=False, size=1, player_number=i, walk_cutscene=True) for i in count_list_items(characters_name)]
         bgm_player.play_music("title")
-        for player in intro_players:
-            player.speedx = 2
-            player.walk_cutscene = True
 
     if fade_in:
         fade_out = False
@@ -2721,26 +2756,28 @@ while running:
                 camera.x = 0
                 camera.y = 0
                 if time > 100:
+                    bgm_player.paused = False
                     bgm_player.play_music(main_music)
                 for i in range(player_count):
-                    if player_lives[i] == 0:
+                    if get_key(player_lives, i) == 0:
                         player_lives[i] = lives
-                    players.append(Player(x=spawnposx + (i * 8), y=spawnposy, player_number=i, lives=player_lives[i]))
-                    power_meters.append(PowerMeter(players[i]))
-                    players_hud.append(PlayerHUD(players[i]))
+                    players.append(Player(x=spawnposx + (i * 8), y=spawnposy, player_number=i, lives=get_key(player_lives, i), size=get_key(player_sizes, i)))
+                    power_meters.append(PowerMeter(get_key(players, i)))
+                    players_hud.append(PlayerHUD(get_key(players, i)))
             elif reset_ready:
                 initialize_game()
                 create_course(f"courses/{course_directory}/{world}-{course}")
                 camera.x = 0
                 camera.y = 0
                 if time > 100:
+                    bgm_player.paused = False
                     bgm_player.play_music(main_music)
                 for i in range(player_count):
-                    if player_lives[i] == 0:
+                    if get_key(player_lives, i) == 0:
                         player_lives[i] = lives
-                    players.append(Player(x=spawnposx + (i * 8), y=spawnposy, player_number=i, lives=player_lives[i]))
-                    power_meters.append(PowerMeter(players[i]))
-                    players_hud.append(PlayerHUD(players[i]))
+                    players.append(Player(x=spawnposx + (i * 8), y=spawnposy, player_number=i, lives=get_key(player_lives, i), size=get_key(player_sizes, i)))
+                    power_meters.append(PowerMeter(get_key(players, i)))
+                    players_hud.append(PlayerHUD(get_key(players, i)))
             elif everyone_dead:
                 if all(player.lives == 0 for player in players):
                     fade_out = True
@@ -2758,13 +2795,32 @@ while running:
                     camera.x = 0
                     camera.y = 0
                     if time > 100:
+                        bgm_player.paused = False
                         bgm_player.play_music(main_music)
                     for i in range(player_count):
-                        if player_lives[i] == 0:
+                        if get_key(player_lives, i) == 0:
                             player_lives[i] = lives
-                        players.append(Player(x=spawnposx + (i * 8), y=spawnposy, player_number=i, lives=player_lives[i]))
-                        power_meters.append(PowerMeter(players[i]))
-                        players_hud.append(PlayerHUD(players[i]))
+                        players.append(Player(x=spawnposx + (i * 8), y=spawnposy, player_number=i, lives=get_key(player_lives, i), size=get_key(player_sizes, i) if get_key(nitpicks, "dont_reset_size") else 0))
+                        power_meters.append(PowerMeter(get_key(players, i)))
+                        players_hud.append(PlayerHUD(get_key(players, i)))
+            elif pipe_ready:
+                subzone = (next((marker for marker in [player.pipe_marker for player in players] if marker is not None), None)).zone
+                initialize_game()
+                try:
+                    create_course(f"courses/{course_directory}/{world}-{course}" if subzone == 0 else f"courses/{course_directory}/{world}-{course}_{subzone}", True)
+                except:
+                    raise CustomError("MissingSubzoneError", f"Subzone {subzone} does not exist in {world}-{course}.")
+                camera.x = 0
+                camera.y = 0
+                if time > 100:
+                    bgm_player.paused = False
+                    bgm_player.play_music(main_music)
+                for i in range(player_count):
+                    if get_key(player_lives, i) == 0:
+                        player_lives[i] = lives
+                    players.append(Player(x=spawnposx + (i * 8), y=spawnposy, player_number=i, lives=get_key(player_lives, i), size=get_key(player_sizes, i)))
+                    power_meters.append(PowerMeter(get_key(players, i)))
+                    players_hud.append(PlayerHUD(get_key(players, i)))
 
     elif fade_out:
         fade_in = False
@@ -2781,7 +2837,7 @@ while running:
                 ["quit", 1]
             ],
             [
-                [f"controls ({characters_name[players_controls - 1]})", 0.75, tuple(characters_color[players_controls - 1])],
+                [f"controls ({get_key(characters_name, players_controls - 1)})", 0.75, tuple(get_key(characters_name, players_controls - 1))],
                 [f"music volume: {int(mus_vol * 100)}%", 0.875],
                 [f"sound volume: {int(snd_vol * 100)}%", 1],
                 ["set course pack", 1.125],
@@ -2794,21 +2850,21 @@ while running:
         textures_list = get_folders("textures")
         textures = [["base texture", 0.75]]
         if not len(textures_list) == 0:
-            textures.append([f"{textures_list[selected_texture - 1]}", 0.875])
+            textures.append([f"{get_key(textures_list, selected_texture - 1)}", 0.875])
         textures.append(["back", 0.875 if len(textures_list) == 0 else 1])
         title_screen.append(textures)
 
         courses_list = get_folders("courses")
         courses = []
         if not len(courses_list) == 0:
-            courses.append([f"{courses_list[selected_course_pack - 1]}", 0.75])
+            courses.append([f"{get_key(courses_list, selected_course_pack - 1)}", 0.75])
         courses.append(["back", 0.75 if len(courses_list) == 0 else 0.875])
         title_screen.append(courses)
 
         for i in count_list_items(characters_data):
             title_screen.append(
                 [
-                    *[[f"{bind} ({characters_name[i]}): {pygame.key.name(controls_table[i][bind])}", 0.75 + (j / 8)] for j, bind in enumerate(bind_table)],
+                    *[[f"{bind} ({get_key(characters_name, i)}): {pygame.key.name(get_key(controls_table, i, bind))}", 0.75 + (j / 8)] for j, bind in enumerate(bind_table)],
                     ["back", 1.625]
                 ]
             )
@@ -2818,7 +2874,7 @@ while running:
         background_manager.update()
         background_manager.draw()
 
-        menu_options = title_screen[menu_area - 1]
+        menu_options = get_key(title_screen, menu_area - 1)
         selected_menu_index = range_number(selected_menu_index, 0, len(menu_options) - 1)
         if not old_selected_menu_index == selected_menu_index:
             sound_player.play_sound(beep_sound)
@@ -2831,18 +2887,20 @@ while running:
         for player in intro_players:
             player.rect.bottom = title_ground.y
             player.on_ground = True
+            player.speed = 2
+            player.speedx = 2
             player.speedy = 0
             player.fall_timer = 0
             player.draw()
             player.update()
 
-        if menu_options == title_screen[0]:
+        if menu_options == get_key(title_screen, 0):
             for i in count_list_items(menu_options):
-                options = menu_options[i]
+                options = get_key(menu_options, i)
 
                 text.create_text(
-                    text=options[0].upper(),
-                    position=(centerx, centery * options[1]),
+                    text=get_key(options, 0).upper(),
+                    position=(centerx, centery * get_key(options, 1)),
                     alignment="center",
                     stickxtocamera=True,
                     color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
@@ -2857,16 +2915,16 @@ while running:
                         scale=0.5
                     )
         
-        elif menu_options == title_screen[1]:
+        elif menu_options == get_key(title_screen, 1):
             for i in count_list_items(menu_options):
-                options = menu_options[i]
+                options = get_key(menu_options, i)
 
                 text.create_text(
-                    text=options[0].upper(),
-                    position=(centerx, centery * options[1]),
+                    text=get_key(options, 0).upper(),
+                    position=(centerx, centery * get_key(options, 1)),
                     alignment="center",
                     stickxtocamera=True,
-                    color=(options[2] if selected_menu_index == i else tuple(x / 2 for x in options[2])) if len(options) == 3 else ((255, 255, 255) if selected_menu_index == i else (128, 128, 128))
+                    color=(get_key(options, 2) if selected_menu_index == i else tuple(x / 2 for x in get_key(options, 2))) if len(options) == 3 else ((255, 255, 255) if selected_menu_index == i else (128, 128, 128))
                 )
 
                 if selected_menu_index == 0:
@@ -2878,13 +2936,13 @@ while running:
                         scale=0.5
                     )
         
-        elif menu_options == title_screen[2]:
+        elif menu_options == get_key(title_screen, 2):
             for i in count_list_items(textures):
-                texture_data = textures[i]
+                texture_data = get_key(textures, i)
                 
                 text.create_text(
-                    text=texture_data[0].upper(),
-                    position=(centerx, centery * texture_data[1]),
+                    text=get_key(texture_data, 0).upper(),
+                    position=(centerx, centery * get_key(texture_data, 1)),
                     alignment="center",
                     stickxtocamera=True,
                     color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
@@ -2908,13 +2966,13 @@ while running:
                         scale=0.5
                     )
         
-        elif menu_options == title_screen[3]:
+        elif menu_options == get_key(title_screen, 3):
             for i in count_list_items(courses):
-                course_data = courses[i]
+                course_data = get_key(courses, i)
                 
                 text.create_text(
-                    text=course_data[0].upper(),
-                    position=(centerx, centery * course_data[1]),
+                    text=get_key(course_data, 0).upper(),
+                    position=(centerx, centery * get_key(course_data, 1)),
                     alignment="center",
                     stickxtocamera=True,
                     color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
@@ -2940,11 +2998,11 @@ while running:
         
         elif key_exists(title_screen[4:], menu_options):
             for i in count_list_items(menu_options):
-                options = menu_options[i]
+                options = get_key(menu_options, i)
 
                 text.create_text(
-                    text=options[0].upper(),
-                    position=(centerx, centery * options[1]),
+                    text=get_key(options, 0).upper(),
+                    position=(centerx, centery * get_key(options, 1)),
                     alignment="center",
                     stickxtocamera=True,
                     color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
@@ -2967,25 +3025,22 @@ while running:
             bgm_player.play_music("title")
             fade_out = True
             title = False
-            for player in intro_players:
-                player.speedx = 2
-                player.walk_cutscene = True
 
     elif game:
-        if 0 < sum(1 for player in players if player.pipe_timer == player.pipe_duration * 60) < len(players):
-            pipe_wait_timer = (60 * (pipe_timer - 1)) if (sum(1 for player in players if player.dead_timer >= 30) == len(players) - 1) else min(pipe_wait_timer + 1, (60 * (pipe_timer - 1)))
-        elif sum(1 for player in players if player.pipe_timer == player.pipe_duration * 60) == len(players):
-            pipe_wait_timer = (60 * (pipe_timer - 1))
+        if 0 < sum(1 for player in players if player.pipe_timer >= player.pipe_duration * 60) < len(players):
+            pipe_wait_timer = (60 * (pipe_timer - 1)) if (sum(player for player in players if player.dead_timer >= 30) == len(players)) else min(pipe_wait_timer + 1, (60 * (pipe_timer - 1)))
+        elif sum(1 for player in players if player.pipe_timer >= player.pipe_duration * 60) == len(players):
+            pipe_wait_timer = 60 * (pipe_timer - 1)
 
-        pipe_ready = pipe_wait_timer == (60 * (pipe_timer - 1))
+        pipe_ready = pipe_wait_timer == 60 * (pipe_timer - 1)
         if pipe_ready and not fade_in:
             fade_in = True
             bgm_player.fade_out()
-        
+
         if not pause:
             dt += 1
 
-        if nor(pause, everyone_dead, any(player.size_change for player in players), any(player.piping for player in players), any(player.clear for player in players), nitpicks["infinite_time"]):
+        if nor(pause, everyone_dead, any(player.size_change for player in players), any(player.piping for player in players), any(player.clear for player in players), get_key(nitpicks, "infinite_time")):
             game_dt += 1
             
         course_time = floor(game_dt/60) if get_game_property("use_elapsed_time") else ceil(time - (game_dt/get_game_property("timer_speed"))/60)
@@ -2993,12 +3048,6 @@ while running:
         background_manager.load_background(background)
         background_manager.update()
         background_manager.draw()
-
-        try:
-            if nor(any(player.piping for player in players), everyone_dead, pause):
-                camera.update([player for player in players if not player.dead], x_range, y_range - 400)
-        except ZeroDivisionError:
-            pass
 
         if castle:
             castle.draw()
@@ -3008,7 +3057,7 @@ while running:
             if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
                 flagpole.update()
 
-        for item in items[:]:
+        for item in fix_list(items):
             if item.is_visible():
                 if (item.sprouting and item.sprout_timer > 0) or not item.sprouting:
                     item.draw()
@@ -3040,7 +3089,7 @@ while running:
                 tile.update()
 
         for fireball_list in fireballs_table.values():
-            for fireball in fireball_list[:]:
+            for fireball in fix_list(fireball_list):
                 if fireball.is_visible():
                     fireball.draw()
                     if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
@@ -3077,7 +3126,7 @@ while running:
             if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
                 power_meter.update()
 
-        for enemy in enemies[:]:
+        for enemy in fix_list(enemies):
             if enemy.is_visible():
                 enemy.draw()
             else:
@@ -3086,7 +3135,7 @@ while running:
             if enemy.below_camera():
                 enemies.remove(enemy)
 
-        if progress_bar:
+        if progress_bar and show_progress_bar:
             progress_bar.draw()
             progress_bar.update()
 
@@ -3133,17 +3182,17 @@ while running:
         if all(player.dead_timer >= get_game_property("death_timer") * 60 for player in players) and not bgm_player.is_playing(dead_music):
             fade_in = True
 
-        for debris_part in debris[:]:
+        for debris_part in fix_list(debris):
             debris_part.draw()
             if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
                 debris_part.update()
 
-        for particle in particles[:]:
+        for particle in fix_list(particles):
             particle.draw()
             if nor(any(player.size_change for player in players), everyone_dead, pause, pipe_ready):
                 particle.update()
 
-        for overlay in overlays[:]:
+        for overlay in fix_list(overlays):
             overlay.draw()
             if not pause:
                 overlay.update()
@@ -3184,7 +3233,7 @@ while running:
             if 0 <= game_dt <= 60 or 180 <= game_dt <= 240:
                 course_name_y = SCREEN_HEIGHT - (12 * (sin(radians((game_dt - 30) * 3)) + 1))
             
-            if not nitpicks["hide_course_name"]:
+            if show_course_name and nor(get_key(nitpicks, "hide_course_name"), course_name is None):
                 text.create_text(
                     text=course_name,
                     position=(centerx, course_name_y),
@@ -3202,7 +3251,7 @@ while running:
                 for player in players:
                     text.create_text(
                         text=f"x{player.lives}",
-                        position=(16 + (player_hud.sprite_size[0] // 2), 24 + (player.player_number + 1) * 16),
+                        position=(16 + (get_key(player_hud.sprite_size, 0) // 2), 24 + (player.player_number + 1) * 16),
                         stickxtocamera=True,
                         stickytocamera=True,
                         scale=0.5
@@ -3222,11 +3271,11 @@ while running:
 
         if pause:
             for i in count_list_items(pause_menu_options):
-                options = pause_menu_options[i]
+                options = get_key(pause_menu_options, i)
 
                 text.create_text(
-                    text=options[0].upper(),
-                    position=(centerx, centery * options[1]),
+                    text=get_key(options, 0).upper(),
+                    position=(centerx, centery * get_key(options, 1)),
                     alignment="center",
                     stickxtocamera=True,
                     stickytocamera=True,
@@ -3236,6 +3285,12 @@ while running:
         if not old_pause_menu_index == pause_menu_index:
             sound_player.play_sound(beep_sound)
         old_pause_menu_index = pause_menu_index
+
+        try:
+            if nor(any(player.piping for player in players), everyone_dead, pause):
+                camera.update([player for player in players if not player.dead], x_range, y_range - 400)
+        except ZeroDivisionError:
+            pass
     
     elif game_over:
         dt += 1
@@ -3252,16 +3307,16 @@ while running:
                 scale=0.5
             )
 
-    if nitpicks["show_battery"]:
+    if get_key(nitpicks, "show_battery"):
         battery = psutil.sensors_battery().percent
         text.create_text(
             text=f"BATTERY: {battery}%",
-            position=(632, 384 - (text.font_size / 2 if nitpicks["show_time"] else 0)),
+            position=(632, 384 - (text.font_size / 2 if get_key(nitpicks, "show_time") else 0)),
             alignment="right", stickxtocamera=True, stickytocamera=True, scale=0.5,
             color=tuple(range_number(c, 0, 255) for c in ((255, 0, 0) if battery < 0 else ((255, min(255, int(255 * (battery / 40))), 0) if battery < 50 else (max(0, int(255 * (1 - ((battery - 50) / 40)))), 255, 0) if battery < 100 else (0, 255, 0))))
         )
 
-    if nitpicks["show_time"]:
+    if get_key(nitpicks, "show_time"):
         text.create_text(
             text=f"TIME: {datetime.now().strftime('%H:%M:%S')}",
             position=(632, 384), alignment="right", stickxtocamera=True, stickytocamera=True, scale=0.5
@@ -3277,27 +3332,32 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = menu = title = fade_in = fade_out = binding_key = current_bind = False
+        elif event.type == pygame.WINDOWFOCUSLOST and game:
+            bgm_player.pause_music()
+            pause = not pause
+            sound_player.play_sound(pause_sound)
+            pause_menu_index = old_pause_menu_index = 0
         elif event.type == pygame.KEYDOWN:
             key, mod = event.key, event.mod
-            if game and any(key == controls_set["pause"] for controls_set in controls_table) and nor(any(p.piping for p in players), everyone_dead):
+            if game and any(key == get_key(controls, "pause") for controls_set in controls_table) and nor(any(player.piping for player in players), everyone_dead):
                 bgm_player.pause_music()
                 pause = not pause
                 sound_player.play_sound(pause_sound)
                 pause_menu_index = old_pause_menu_index = 0
             if game and pause and not fade_in:
-                if key == controls["down"]:
+                if key == get_key(controls, "down"):
                     pause_menu_index += 1
-                elif key == controls["up"]:
+                elif key == get_key(controls, "up"):
                     pause_menu_index -= 1
-                elif key in (controls["left"], controls["right"]):
-                    change = numerical_change if key == controls["right"] else -numerical_change
+                elif key in (get_key(controls, "left"), get_key(controls, "right")):
+                    change = 1 if key == get_key(controls, "right") else -1
                     if pause_menu_index == 2:
-                        mus_vol += change
+                        mus_vol += change / (4 if mod & pygame.KMOD_CTRL else 20)
                     elif pause_menu_index == 3:
-                        snd_vol += change
+                        snd_vol += change / (4 if mod & pygame.KMOD_CTRL else 20)
                     elif pause_menu_index == 4:
-                        FPS += 1 if key == controls["right"] else -1
-                elif key == controls["jump"]:
+                        FPS += (change * (5 if mod & pygame.KMOD_CTRL else 1))
+                elif key == get_key(controls, "jump"):
                     if pause_menu_index == 0:
                         pause = False
                         sound_player.play_sound(coin_sound)
@@ -3317,7 +3377,8 @@ while running:
                 fade_in = game_ready = True
             if key == pygame.K_RETURN and mod & pygame.KMOD_ALT:
                 fullscreen = not fullscreen
-                pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | pygame.RESIZABLE | (pygame.FULLSCREEN if fullscreen else 0))
+                fullscreen_transform = True
+                pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | (pygame.FULLSCREEN if fullscreen else 0))
             if menu and nor(title, fade_in, fade_out, game_ready):
                 if binding_key:
                     sound_player.play_sound(shrink_sound if key == pygame.K_ESCAPE else powerup_sound)
@@ -3326,36 +3387,37 @@ while running:
                     binding_key = current_bind = False
                     sound_player.stop_sound(sprout_sound)
                 else:
-                    if key == controls["down"]:
+                    if key == get_key(controls, "down"):
                         selected_menu_index += 1
-                    elif key == controls["up"]:
+                    elif key == get_key(controls, "up"):
                         selected_menu_index -= 1
-                    elif key in (controls["left"], controls["right"]):
-                        change = numerical_change if key == controls["right"] else -numerical_change
-                        if menu_options == title_screen[0] and selected_menu_index == 0:
-                            players_ready += 1 if key == controls["right"] else -1
-                        elif menu_options == title_screen[1]:
+                    elif key in (get_key(controls, "left"), get_key(controls, "right")):
+                        change = 1 if key == get_key(controls, "right") else -1
+                        if menu_options == get_key(title_screen, 0) and selected_menu_index == 0:
+                            players_ready += 1 if key == get_key(controls, "right") else -1
+                        elif menu_options == get_key(title_screen, 1):
+                            change = 1 if key == get_key(controls, "right") else -1
                             if selected_menu_index == 0:
-                                players_controls += 1 if key == controls["right"] else -1
+                                players_controls += change
                             elif selected_menu_index == 1:
-                                mus_vol += change
+                                mus_vol += change / (4 if mod & pygame.KMOD_CTRL else 20)
                             elif selected_menu_index == 2:
-                                snd_vol += change
+                                snd_vol += change / (4 if mod & pygame.KMOD_CTRL else 20)
                             elif selected_menu_index == 5:
-                                FPS += 1 if key == controls["right"] else -1
-                        elif menu_options == title_screen[2] and selected_menu_index == 1 and len(textures) >= 1:
-                            selected_texture += 1 if key == controls["right"] else -1
-                        elif menu_options == title_screen[3] and selected_menu_index == 1 and len(courses) >= 1:
-                            selected_course_pack += 1 if key == controls["right"] else -1
-                    elif key == controls["run"] and not binding_key:
+                                FPS += (change * (5 if mod & pygame.KMOD_CTRL else 1))
+                        elif menu_options == get_key(title_screen, 2) and selected_menu_index == 1 and len(textures) >= 1:
+                            selected_texture += 1 if key == get_key(controls, "right") else -1
+                        elif menu_options == get_key(title_screen, 3) and selected_menu_index == 1 and len(courses) >= 1:
+                            selected_course_pack += 1 if key == get_key(controls, "right") else -1
+                    elif key == get_key(controls, "run") and not binding_key:
                         if menu_options in title_screen[1:4] or key_exists(title_screen[4:], menu_options):
                             selected_menu_index = old_selected_menu_index = 0
-                            menu_area = 1 if menu_options == title_screen[1] else 2
+                            menu_area = 1 if menu_options == get_key(title_screen, 1) else 2
                             players_ready = old_players_ready = 1
                             players_controls = old_players_controls = 1
                             sound_player.play_sound(shrink_sound)
-                    elif key == controls["jump"]:
-                        if menu_options == title_screen[0]:
+                    elif key == get_key(controls, "jump"):
+                        if menu_options == get_key(title_screen, 0):
                             if selected_menu_index == 1:
                                 selected_menu_index = old_selected_menu_index = 0
                                 menu_area = 2
@@ -3371,8 +3433,8 @@ while running:
                                 sound_player.play_sound(coin_sound)
                                 player_count = players_ready
                                 player_lives, player_sizes = [lives] * player_count, [0] * player_count
-                        elif menu_options == title_screen[1]:
-                            if selected_menu_index in (0, 3, 4, 6):
+                        elif menu_options == get_key(title_screen, 1):
+                            if key_exists((0, 3, 4, 6), selected_menu_index):
                                 if selected_menu_index == 0:
                                     menu_area = players_controls + 4
                                 elif selected_menu_index == 3:
@@ -3386,7 +3448,7 @@ while running:
                                 selected_texture = old_selected_texture = 1
                                 selected_course_pack = old_selected_course_pack = 1
                                 sound_player.play_sound(coin_sound)
-                        elif menu_options == title_screen[2]:
+                        elif menu_options == get_key(title_screen, 2):
                             if selected_menu_index == 0:
                                 old_asset_directory = asset_directory
                                 asset_directory = "assets"
@@ -3397,17 +3459,17 @@ while running:
                                     sound_player.play_sound(coin_sound)
                                 else:
                                     old_asset_directory = asset_directory
-                                    asset_directory = f"textures/{textures_list[selected_texture - 1]}"
+                                    asset_directory = f"textures/{get_key(textures_list, selected_texture - 1)}"
                             else:
                                 selected_menu_index = old_selected_menu_index = 0
                                 menu_area = 2
                                 sound_player.play_sound(coin_sound)
-                        elif menu_options == title_screen[3]:
+                        elif menu_options == get_key(title_screen, 3):
                             if selected_menu_index == 0:
                                 if len(courses_list) == 0:
                                     selected_menu_index = old_selected_menu_index = 0
                                 else:
-                                    course_directory = f"{courses_list[selected_course_pack - 1]}"
+                                    course_directory = f"{get_key(courses_list, selected_course_pack - 1)}"
                                 menu_area = 2
                                 sound_player.play_sound(coin_sound)
                             else:
@@ -3422,13 +3484,13 @@ while running:
                                 sound_player.play_sound(coin_sound)
                             else:
                                 binding_key = True
-                                current_bind = bind_table[selected_menu_index]
+                                current_bind = get_key(bind_table, selected_menu_index)
                                 sound_player.play_sound(sprout_sound)
                                 sound_player.stop_sound(powerup_sound)
 
-    clock.tick(FPS)
-    bgm_player.update()
     pygame.display.update()
+    bgm_player.update()
+    clock.tick(FPS)
 
 pygame.quit()
 
@@ -3437,7 +3499,7 @@ with open(load_local_file("settings.json"), "w") as settings:
         {
             "mus_vol": mus_vol,
             "snd_vol": snd_vol,
-            **{f"controls{'' if i == 0 else i+1}": controls_table[i] for i in count_list_items(controls_table)},
+            **{f"controls{'' if i == 0 else i+1}": get_key(controls_table, i) for i in count_list_items(controls_table)},
             "fps": FPS,
             "fullscreen": fullscreen,
             "asset_directory": asset_directory,
