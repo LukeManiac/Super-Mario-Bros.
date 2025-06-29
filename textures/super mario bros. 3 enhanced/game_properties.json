@@ -1,0 +1,70 @@
+{
+    "^": "Core configuration settings for the game, including constants, character properties, animations, physics, and sound loop points.",
+    "animation_speed": {"fire flower": 0.125},
+    "character_properties": {
+        "midair_turn": true,
+        "star_duration": 6.4,
+        "character_data": [
+            {
+                "frames": {
+                    "fall": 1,
+                    "runfall": 1,
+                    "swim": 4,
+                    "swimpush": 2,
+                    "fire": 2
+                }
+            },
+            {
+                "frames": {
+                    "jump": 3,
+                    "fall": 3,
+                    "runfall": 1,
+                    "swim": 4,
+                    "swimpush": 2,
+                    "fire": 2
+                }
+            },
+            {
+                "frames": {
+                    "fall": 1,
+                    "runfall": 1,
+                    "swim": 4,
+                    "swimpush": 2,
+                    "fire": 2
+                },
+                "color": [255, 172, 0]
+            },
+            {
+                "frames": {
+                    "fall": 1,
+                    "runfall": 1,
+                    "swim": 4,
+                    "swimpush": 2,
+                    "fire": 2
+                },
+                "color": [0, 126, 255]
+            }
+        ]
+    },
+    "enemies": {
+        "classic_death_anim": false,
+        "goomba": {"frames": {"shot": 1}},
+        "koopa": {
+            "offsety": 2,
+            "shell_death_anim": true
+        }
+    },
+    "font_outline": true,
+    "lives": 5,
+    "loop_points": {
+        "overworld": 3480,
+        "overworld_fast": 2907,
+        "title": 5247
+    },
+    "progress_bar_colors": [
+        [247, 57, 16],
+        [255, 172, 0],
+        [33, 173, 16]
+    ],
+    "timer_speed": 0.6
+}
