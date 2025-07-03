@@ -2,6 +2,7 @@ import json, numpy, psutil, sys, random
 from os.path import dirname, abspath, exists, getsize, isdir, splitext, basename
 from os import listdir, makedirs, environ, devnull
 from datetime import datetime as system_time
+from tkinter import messagebox
 
 environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "1"
 
@@ -13,9 +14,11 @@ class SuppressStderr:
         sys.stderr.close()
         sys.stderr = self.stderr
 
-class CustomError(Exception):
-    def __init__(self, name, message):
-        super().__init__(f"{name}: {message}")
+class CustomError:
+    def __init__(self, error_name, error_message):
+        pygame.quit()
+        messagebox.showerror("Error", f"{error_name}: {error_message}")
+        sys.exit()
 
 with SuppressStderr():
     import pygame
@@ -23,11 +26,10 @@ with SuppressStderr():
     pygame.font.init()
     pygame.mixer.init()
 
-intro_messages = ["Welcome to the Mushroom Kingdom adventure!", "Get ready to jump into action!", "Mario's quest begins now!", "Power up and save the day!", "Time to stomp some Goombas!", "Prepare for a thrilling journey!", "The princess needs your help!", "Explore worlds full of secrets!", "Collect coins and break blocks!", "Bowser won't know what hit him!", "Race through pipes and platforms!", "Defy gravity, conquer challenges!", "Unlock hidden levels and surprises!", "Run, jump, and slide to victory!", "Keep your fire flower ready!", "Watch out for Koopa shells!", "Master every move with precision!", "From 1-1 to the final castle!", "Your adventure, your story!", "Feel the rush of the classic game!", "A timeless quest for heroes!", "Challenge the odds and prevail!", "Victory is just a jump away!", "Save the princess, save the kingdom!", "Adventure awaits in every corner!", "Every level brings new excitement!", "Can you beat the high score?", "Classic fun for new generations!", "Explore lush forests and lava pits!", "Defeat enemies with skill and speed!", "Jump higher, run faster, win bigger!", "Collect every star and power-up!", "Face Bowser's minions head-on!", "Navigate tricky terrain with style!", "The ultimate platforming challenge!", "A world of wonder and peril!", "Super Mario Bros. is back!", "Become the hero of the Mushroom Kingdom!", "Leap into action with Mario and Luigi!", "Rescue Princess Peach from danger!", "Break bricks and find secrets!", "Avoid pitfalls and traps!", "Use power-ups to your advantage!", "The kingdom's fate rests with you!", "Run through castles and dungeons!", "Jump across moving platforms!", "Feel the thrill of classic gameplay!", "Challenge your friends to beat your score!", "Master the art of platforming!", "Explore every hidden path!", "Save Toad and the Mushroom People!", "Use your wits and reflexes!", "A legendary adventure awaits!", "The classic saga continues!", "Collect coins to unlock surprises!", "Face off against Bowser's toughest minions!", "Discover secret warp zones!", "Run and jump through perilous landscapes!", "Can you defeat Bowser and save the day?", "Explore colorful worlds full of life!", "Challenge yourself with tougher levels!", "Run fast, jump smart, win big!", "A world of fun and adventure!", "Help Mario restore peace to the kingdom!", "Face enemies with courage and skill!", "Jump higher, run faster, play better!", "The Mushroom Kingdom is counting on you!", "Avoid traps and find hidden treasures!", "Race through levels with precision!", "Use power-ups wisely to survive!", "Classic platforming at its finest!", "Get ready for an unforgettable journey!", "Explore new worlds and face new foes!", "Defeat Bowser in the ultimate showdown!", "Save Princess Peach from peril!", "Jump, run, and stomp your way to victory!", "Classic fun for all ages!", "Explore every corner of the Mushroom Kingdom!", "Take on the challenge and win!", "Discover the secrets of every level!", "A quest full of excitement and danger!", "Jump into action and save the day!", "Can you beat the final boss?", "Race through castles and forests!", "Use skill and timing to win!", "The classic hero returns!", "Adventure and excitement await!", "Explore the Mushroom Kingdom like never before!", "Take on Bowser and his minions!", "Classic gameplay meets new challenges!", "Help Mario rescue the princess!", "Jump, run, and explore!", "The Mushroom Kingdom needs a hero!", "Your adventure starts now!", "Save the kingdom from evil!", "Run, jump, and power up!", "Classic Mario fun begins!", "Get ready for an epic quest!", "Face challenges and enemies!", "Run through worlds full of surprises!", "Jump into the classic adventure!"]
+def get_start(text, num_chars):
+    return text[:num_chars]
 
 is_executable = getattr(sys, "frozen", False)
-
-intro_message = random.choice(intro_messages)
 
 infinity = float("inf")
 pi = 3.141592653589793
@@ -108,6 +110,12 @@ def lerp_color(color1, color2, t):
 def load_local_file(file):
     return f"{main_directory}/{file}"
 
+def load_system_file(file):
+    return load_local_file(f"system/{file}")
+
+def load_intro_file(file):
+    return load_system_file(f"intro/{file}")
+
 if not exists(load_local_file("courses")):
     makedirs(load_local_file("courses"))
 
@@ -130,9 +138,6 @@ try:
 
     if not isdir(load_local_file(asset_directory)):
         asset_directory = "assets"
-
-    if not isinstance(asset_directory, str):
-        raise CustomError("SaveDataError", f"Invalid type for 'asset_directory' in settings.json: expected str, got {type(asset_directory).__name__}.")
 except:
     pass
 
@@ -143,9 +148,6 @@ try:
 
     if not isdir(load_local_file(course_directory)):
         course_directory = "classic"
-
-    if not isinstance(course_directory, str):
-        raise CustomError("SaveDataError", f"Invalid type for 'course_directory' in settings.json: expected str, got {type(course_directory).__name__}.")
 except:
     pass
 
@@ -702,7 +704,8 @@ class Text:
         self.font_size = 16
         self.font = pygame.font.Font(load_asset("font.ttf"), self.font_size)
 
-    def create_text(self, text, position, color=(255, 255, 255), alignment="left", stickxtocamera=False, stickytocamera=False, scale=1):
+    def create_text(self, text, position, color=(255, 255, 255), alignment="left", stickxtocamera=False, stickytocamera=False, scale=1, font=None):
+        font = self.font if font is None else pygame.font.Font(font, self.font_size)
         x, y = position
 
         lines = text.split("\n")
@@ -723,7 +726,7 @@ class Text:
                     else:
                         c = (255, 255, 255)
                         use_default = True
-                    char_surface = self.font.render(char, True, c)
+                    char_surface = font.render(char, True, c)
                     if scale != 1.0:
                         char_surface = pygame.transform.scale(char_surface, (int(text_width * scale), int(text_height * scale)))
                     surfaces.append(char_surface)
@@ -735,7 +738,7 @@ class Text:
                     text_surface.blit(s, (offset, 0))
                     offset += s.get_width()
             else:
-                text_surface = self.font.render(line, True, color)
+                text_surface = font.render(line, True, color)
                 text_width, text_height = text_surface.get_size()
                 if scale != 1.0:
                     text_surface = pygame.transform.scale(text_surface, (int(text_width * scale), int(text_height * scale)))
@@ -747,7 +750,7 @@ class Text:
                 outline_size = scale * 2
                 outline_surface = pygame.Surface((int(text_width + outline_size * 2), int(text_height + outline_size * 2)), pygame.SRCALPHA)
 
-                temp_surface = self.font.render(line, True, (0, 0, 0))
+                temp_surface = font.render(line, True, (0, 0, 0))
                 temp_surface = pygame.transform.scale(temp_surface, (int(text_width), int(text_height)))
 
                 for dx in [-outline_size, 0, outline_size]:
@@ -1628,7 +1631,7 @@ class Goomba:
         self.rect = pygame.Rect(0, 0, 0, 0)
         self.shotted = True
         self.stomped = False
-        self.speedx = 2 if self.speedx < 0 else -2
+        self.speedx = 2 * -is_negative(self.speedx)
         self.speedy = -pi
 
         if culprit:
@@ -1769,7 +1772,7 @@ class Koopa:
         self.rect = pygame.Rect(0, 0, 0, 0)
         self.shotted = True
         self.stomped = False
-        self.speedx = 2 if self.speedx < 0 else -2
+        self.speedx = 2 * -is_negative(self.speedx)
         self.speedy = -pi
         self.dt = 0
 
@@ -1838,6 +1841,7 @@ class Player:
         self.controls_enabled = controls_enabled
         self.can_control = controls_enabled
         self.player_number = player_number
+        self.enemy_speedx = 0
         self.speedx = 0
         self.speedy = 0
         self.jump_speedx = 0
@@ -2304,8 +2308,10 @@ class Player:
                     elif self.speedy > 0 and self.rect.bottom - enemy.rect.top < 8 and not enemy.stomped:
                         self.stomped_enemies.append(enemy)
                     elif isinstance(enemy, Koopa):
-                        if enemy.speedx == 0 and self.on_ground and self.rect.right > enemy.rect.left and self.rect.left < enemy.rect.right:
-                            enemy.speedx = enemy.shell_speed + (self.speedx * 0.25) if self.rect.centerx < enemy.rect.centerx else -(enemy.shell_speed + (self.speedx * 0.25))
+                        self.enemy_speedx = (enemy.shell_speed + (self.speedx / 4)) * -is_negative(self.rect.centerx - enemy.rect.centerx)
+                        if enemy.speedx == 0 and ((self.on_ground and self.rect.right > enemy.rect.left and self.rect.left < enemy.rect.right) or (self.fall_timer >= self.fall_duration and self.rect.top - enemy.rect.bottom < 8)):
+                            self.kicked_shell = True
+                            enemy.speedx = self.enemy_speedx
                             overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y))
                             sound_player.play_sound(shot_sound)
                         elif enemy.speedx != 0 and self.on_ground and self.kicked_timer == 0 and not self.shrunk:
@@ -2317,12 +2323,9 @@ class Player:
                                 self.size_change_timer = 0
                                 self.size_change = [target_size, self.size, target_size, self.size, target_size, self.size, target_size]
                                 sound_player.play_sound(shrink_sound)
-                        elif self.fall_timer >= self.fall_duration and self.rect.top - enemy.rect.bottom < 8 and enemy.speedx == 0:
-                            self.kicked_shell = True
-                            enemy.speedx = enemy.shell_speed if self.rect.centerx < enemy.rect.centerx else -enemy.shell_speed
-                            overlays.append(Score(self.rect.x - camera.x, self.rect.y - camera.y))
-                            sound_player.play_sound(shot_sound)
-                    elif not self.shrunk:
+                        elif self.speedy > 0 and self.rect.bottom - enemy.rect.top < 8 and nand(enemy.stomped, enemy.speedx == 0):
+                            self.stomped_enemies.append(enemy)
+                    elif nor((isinstance(enemy, Koopa) and self.kicked_timer == 0), self.shrunk):
                         if self.size == 0:
                             self.dead = True
                         else:
@@ -2703,8 +2706,8 @@ max_fireballs = infinity if get_nitpick("infinite_fireballs") else 2
 game_over = False
 fast_music = False
 
-intro_image = pygame.image.load(load_asset("intro.png")).convert_alpha()
-intro_sound = pygame.mixer.Sound(load_asset("intro.wav"))
+intro_sound = pygame.mixer.Sound(load_intro_file("boot.wav"))
+intro_message = random.choice(load_json("system/intro/messages"))
 
 sound_player.play_sound(intro_sound)
 
@@ -2826,6 +2829,8 @@ while running:
                     if not get_game_property("character_properties", "hide_power_meter"):
                         power_meters.append(PowerMeter(get_key(players, i)))
             elif everyone_dead:
+                camera.x = 0
+                camera.y = 0
                 if all(player.lives == 0 for player in players):
                     fade_out = True
                     game_over = True
@@ -2839,8 +2844,6 @@ while running:
                 else:
                     initialize_game()
                     create_course(f"courses/{course_directory}/{world}-{course}")
-                    camera.x = 0
-                    camera.y = 0
                     if time > 100:
                         bgm_player.paused = False
                         bgm_player.play_music(main_music)
@@ -2864,8 +2867,21 @@ while running:
             fade_out = False
 
     if intro:
-        screen.blit(intro_image, (0, 0))
+        screen.blit(pygame.image.load(load_intro_file("logo.png")).convert_alpha(), (0, 0))
         intro_dt += 1
+
+        dot_speed = 20
+
+        base_text = floor(intro_dt / (len(intro_message) / dot_speed))
+
+        text.create_text(
+            text=f"{get_start(intro_message, len(intro_message))}{'.' * (((floor((intro_dt - len(intro_message)) / dot_speed) % 4)) if base_text >= len(intro_message) else 0)}" if base_text >= len(intro_message) else get_start(intro_message, min(base_text, len(intro_message))),
+            position=(centerx, centery * 1.75),
+            color=(16.5, 86.5, 8),
+            alignment="center",
+            font=load_intro_file("font.ttf")
+        )
+
         if intro_dt >= (get_game_property("intro_time") * 60) and nor(fade_in, sound_player.is_playing(intro_sound)):
             fade_in = True
 
