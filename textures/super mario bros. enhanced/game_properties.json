@@ -1,0 +1,65 @@
+{
+    "^": "Core configuration settings for the game, including constants, character properties, animations, physics, and sound loop points.",
+    "character_properties": {
+        "hide_power_meter": false,
+        "character_data": [
+            {
+                "frames": {
+                    "crouchfall": 1,
+                    "walk": 6,
+                    "fall": 1,
+                    "run": 3,
+                    "runjump": 1,
+                    "runfall": 1
+                }
+            },
+            {
+                "frames": {
+                    "crouchfall": 1,
+                    "walk": 6,
+                    "fall": 1,
+                    "run": 3,
+                    "runjump": 1,
+                    "runfall": 1
+                }
+            },
+            {
+                "frames": {
+                    "crouchfall": 1,
+                    "walk": 6,
+                    "fall": 1,
+                    "run": 3,
+                    "runjump": 1,
+                    "runfall": 1
+                }
+            },
+            {
+                "frames": {
+                    "crouchfall": 1,
+                    "walk": 6,
+                    "fall": 1,
+                    "run": 3,
+                    "runjump": 1,
+                    "runfall": 1
+                }
+            }
+        ]
+    },
+    "enemies": {
+        "classic_death_anim": false,
+        "goomba": {
+            "frames": {
+                "normal": 20,
+                "shot": 1,
+                "stomp": 2
+            },
+            "frame_speeds": {
+                "normal": 0.5,
+                "stomp": 0.5
+            }
+        },
+        "koopa": {"shell_death_anim": true}
+    },
+    "pitch_shot_sound": true,
+    "pitch_stomp_sound": true
+}
