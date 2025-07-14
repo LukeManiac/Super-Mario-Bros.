@@ -1,0 +1,117 @@
+{
+    "^": "Core configuration settings for the game, including constants, character properties, animations, physics, and sound loop points.",
+    "background_layers": {"bonus": 2},
+    "camera_smoothness": 25,
+    "character_properties": {
+        "hide_power_meter": false,
+        "midair_turn": true,
+        "character_data": [
+            {
+                "frames": {
+                    "fall": 1,
+                    "run": 3,
+                    "runjump": 1,
+                    "runfall": 1,
+                    "swim": 4,
+                    "swimpush": 2,
+                    "fire": 2
+                },
+                "color": [224, 0, 0]
+            },
+            {
+                "frames": {
+                    "walk": 4,
+                    "fall": 1,
+                    "run": 4,
+                    "runjump": 1,
+                    "runfall": 1,
+                    "swim": 4,
+                    "swimpush": 2,
+                    "fire": 2
+                },
+                "frame_speeds": {"walk": 0.125}
+            },
+            {
+                "frames": {
+                    "walk": 8,
+                    "fall": 2,
+                    "run": 4,
+                    "runjump": 1,
+                    "runfall": 3,
+                    "swim": 1,
+                    "swimpush": 2,
+                    "fire": 2
+                },
+                "frame_loops": {
+                    "fall": false,
+                    "runfall": false
+                },
+                "frame_speeds": {"walk": 0.2},
+                "color": [255, 172, 0]
+            },
+            {
+                "frames": {
+                    "walk": 8,
+                    "fall": 2,
+                    "run": 4,
+                    "runjump": 1,
+                    "runfall": 3,
+                    "swim": 1,
+                    "swimpush": 2,
+                    "fire": 2
+                },
+                "frame_loops": {
+                    "fall": false,
+                    "runfall": false
+                },
+                "frame_speeds": {"walk": 0.2},
+                "color": [0, 126, 255]
+            }
+        ]
+    },
+    "enemies": {
+        "classic_death_anim": false,
+        "goomba": {
+            "frames": {
+                "normal": 20,
+                "shot": 1,
+                "stomp": 2
+            },
+            "frame_speeds": {
+                "normal": 0.5,
+                "stomp": 0.5
+            }
+        },
+        "koopa": {
+            "frames": {
+                "normal": 8,
+                "shell": 7
+            },
+            "frame_speeds": {
+                "normal": 0.5,
+                "shell": 0.2
+            },
+            "offsety": 2,
+            "shell_death_anim": true
+        }
+    },
+    "font_outline": true,
+    "lives": 5,
+    "loop_points": {
+        "bonus": 10676,
+        "bonusfast": 8000,
+        "overworld": 2136,
+        "overworld_fast": 1611,
+        "title": 3734
+    },
+    "pitch_shot_sound": true,
+    "pitch_stomp_sound": true,
+    "progress_bar_colors": [
+        [247, 57, 16],
+        [255, 172, 0],
+        [33, 173, 16]
+    ],
+    "star_rainbow_effect": true,
+    "star_roll": true,
+    "timer_speed": 1
+}
