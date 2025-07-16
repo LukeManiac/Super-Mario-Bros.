@@ -22,6 +22,13 @@ infinity = float("inf")
 pi = 3.141592653589793
 main_directory = dirname(sys.executable if is_executable else abspath(__file__))
 
+def get_text_from_language(text):
+    language_text = load_json(join("languages", get_key(splitext(language), 0)), text)
+    if language_text is None:
+        raise CustomError("LanguageError", f"Missing {text} in {language}!")
+    else:
+        return str(language_text)
+
 def random_number(a, b):
     return a + ((int((random_seed_generator() - int(random_seed_generator())) * 1e9) ^ (int((random_seed_generator() - int(random_seed_generator())) * 1e9) >> 21)) & 0xFFFFFFFF) % (b - a + 1)
 
@@ -30,7 +37,7 @@ def random_symmetric(num):
 
 def random_list_item(seq):
     if not seq:
-        raise IndexError("Cannot choose from an empty sequence")
+        raise IndexError(get_text_from_language("Cannot choose from an empty sequence"))
     return get_key(seq, random_number(0, len(seq) - 1))
 
 def is_tuple_of_tuples(value):
@@ -123,7 +130,7 @@ def set_image_alpha(image, alpha=1):
     try:
         alpha = float(alpha)
         if not (0 <= alpha <= 1):
-            raise ValueError(f"Expected value between 0 and 1, got {alpha}.")
+            raise ValueError(get_text_from_language(f"Expected value between 0 and 1, got {alpha}."))
     except:
         alpha = 1
 
@@ -153,6 +160,9 @@ def load_system_file(file):
 def load_intro_file(file):
     return load_system_file(join("intro", file))
 
+def load_menu_tooltip(file):
+    return pygame.image.load(load_system_file(join("menu tooltips", file))).convert_alpha()
+
 if not exists(load_local_file("courses")):
     makedirs(load_local_file("courses"))
 
@@ -170,23 +180,17 @@ def load_json(path, *keys, default=None):
     except (KeyError, TypeError, FileNotFoundError, json.JSONDecodeError):
         return default
 
-try:
-    asset_directory = load_json("settings", "asset_directory", default="assets")
+asset_directory = load_json("settings", "asset_directory", default="assets")
 
-    if not isdir(load_local_file(asset_directory)):
-        asset_directory = "assets"
-except:
-    pass
+if not isdir(load_local_file(asset_directory)):
+    asset_directory = "assets"
 
 old_asset_directory = asset_directory
 
-try:
-    course_directory = load_json("settings", "course_directory", default="classic")
+course_directory = load_json("settings", "course_directory", default="classic")
 
-    if not isdir(load_local_file(course_directory)):
-        course_directory = "classic"
-except:
-    pass
+if not isdir(load_local_file(course_directory)):
+    course_directory = "classic"
 
 def get_folders(directory):
     return [folder for folder in listdir(load_local_file(directory))]
@@ -290,7 +294,7 @@ def scale_image(image, scale_factor=1):
         new_width = int(image.get_width() * abs(get_key(scale_factor, 0)))
         new_height = int(image.get_height() * abs(get_key(scale_factor, 1)))
     else:
-        raise ValueError(f"Invalid type for 'scale_factor': expected int, float, list, or tuple, got {type(scale_factor).__name__}.")
+        raise ValueError(f"{get_text_from_language("Invalid type for 'scale_factor': expected int, float, list, or tuple, got")} {type(scale_factor).__name__}.")
 
     new_surface = pygame.Surface((new_width * 2, new_height * 2), pygame.SRCALPHA)
     new_surface.blit(pygame.transform.scale(image, (new_width, new_height)), (mean((new_width * 2) - new_width, -image.get_width()), mean((new_height * 2) - new_height, -image.get_height())))
@@ -556,10 +560,10 @@ class ProgressBar:
 
         self.colors = get_game_property("progress_bar_colors")
         if not isinstance(self.colors, list) or not all(isinstance(c, (list, tuple)) and len(c) == 3 for c in self.colors):
-            raise CustomError("GamePropertyError", f"Invalid type for 'progress_bar_colors' in game_properties.json: expected list of RGB triplets, got {type(self.colors).__name__}.")
+            raise CustomError("GamePropertyError", f"{get_text_from_language("Invalid type for 'progress_bar_colors' in game_properties.json: expected list of RGB triplets, got")} {type(self.colors).__name__}.")
 
         if len(self.colors) < 2:
-            raise CustomError("GamePropertyError", f"'progress_bar_colors' must contain at least 2 colors.")
+            raise CustomError("GamePropertyError", f"{get_text_from_language("'progress_bar_colors' must contain at least 2 colors.")}")
 
         self.color_start = get_key(self.colors, 0)
         self.color_mid = get_key(self.colors, len(self.colors) // 2)
@@ -660,7 +664,7 @@ class SFXPlayer:
                 elif len(arg) == 1:
                     sounds_to_play.append((get_key(arg, 0), 0))
                 else:
-                    raise ValueError(f"Invalid list argument: {arg}")
+                    raise ValueError(f"{get_text_from_language("Invalid list argument:")} {arg}")
             else:
                 sounds_to_play.append((arg, 0))
 
@@ -717,7 +721,7 @@ class BGMPlayer:
             self.music = load_asset(join("music", f"{music}.ogg"))
             self.loop_point = get_game_property("loop_points", music, default=False)
             if nor(isinstance(self.loop_point, (int, bool)), self.loop_point is None):
-                raise CustomError("LoopPointError", f"Invalid type for 'loop_points' in {join(asset_directory, "loop_points.json")}: expected int, got {type(self.loop_point).__name__}.")
+                raise CustomError("LoopPointError", f"{get_text_from_language("Invalid type for 'loop_points' in game_properties.json: expected int, got")} {type(self.loop_point).__name__}.")
             pygame.mixer.music.load(self.music)
             pygame.mixer.music.play(-1 if self.loop_point == True else 0)
             self.set_volume(mus_vol)
@@ -759,8 +763,10 @@ class Text:
         self.font_size = get_game_property("font_size")
         self.font = pygame.font.Font(load_asset("font.ttf"), self.font_size)
 
-    def create_text(self, text, position, color=(255, 255, 255), alignment="left", stickxtocamera=False, stickytocamera=False, scale=1, font=None, font_size=None, outline=True):
+    def create_text(self, text, position, color=(255, 255, 255), alignment="left", stickxtocamera=False, stickytocamera=False, scale=1, font=None, font_size=None, outline=True, make_caps=True):
         text = str(text)
+        if make_caps:
+            text = text.upper()
         font_size = self.font_size if font_size is None else font_size
         font = self.font if font is None else pygame.font.Font(font, font_size)
         x, y = position
@@ -821,7 +827,7 @@ class Text:
 
             rendered_lines.append((text_surface, text_surface.get_width(), text_surface.get_height()))
 
-        for i, (text_surface, text_width, text_height) in enumerate(rendered_lines):
+        for i, (text_surface, text_width, _) in enumerate(rendered_lines):
             line_x = x
             line_y = y + i * (scale * (font_size ** 2) / 10)
 
@@ -1964,6 +1970,8 @@ class Player:
         self.speedy = 0
         self.jump_speedx = 0
         self.frame_timer = 0
+        self.changing_controls = False
+        self.control_changing_timer = 0
         self.on_ground = False
         self.facing_right = True
         self.pipe_anim_timer = 0
@@ -2594,6 +2602,10 @@ class Player:
         self.rect.x = range_number(self.rect.x, 0, camera.x + SCREEN_WIDTH)
 
     def draw(self, scale=1, offset_x=0, offset_y=0):
+        if menu:
+            self.changing_controls = self == control_changing_player and key_exists(title_screen[4:], menu_options)
+            self.control_changing_timer = range_number(self.control_changing_timer + (1 if self.changing_controls else -1), 0, 60)
+
         if not self.can_draw:
             return
 
@@ -2668,6 +2680,7 @@ controls4 = {
     "jump": pygame.K_PAGEUP
 }
 fullscreen = False
+language = "english.json"
 
 characters_data = get_game_property("character_properties", "character_data")
 characters_name = [get_game_property("character_properties", "character_data", i, "name") for i in count_list_items(characters_data)]
@@ -2754,9 +2767,10 @@ nitpicks = load_json("nitpicks")
 moonwalking_mario, moonwalking_enemies, classic_powerdown, hurry_mode, inverted_block_bounce, infinite_fireballs, infinite_lives, infinite_time, show_fps, show_battery, show_time, play_music_in_pause, non_progressive_powerups, always_underwater, hide_course_name, dont_reset_size, always_konami, rainbow_progress_bar = nitpicks.values()
 
 if exists(load_local_file("settings.json")) and not getsize(load_local_file("settings.json")) == 0:
-    mus_vol = load_json("settings", "mus_vol")
-    snd_vol = load_json("settings", "snd_vol")
-    fullscreen = load_json("settings", "fullscreen")
+    mus_vol = load_json("settings", "mus_vol", default=1)
+    snd_vol = load_json("settings", "snd_vol", default=1)
+    fullscreen = load_json("settings", "fullscreen", default=False)
+    language = load_json("settings", "language", default="english.json")
 
     for key in load_json("settings"):
         if key.startswith("controls"):
@@ -2771,7 +2785,7 @@ centery = SCREEN_HEIGHT / 2
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SCALED | (pygame.FULLSCREEN if fullscreen else 0))
 clock = pygame.time.Clock()
 pygame.display.set_icon(pygame.image.load(load_asset("icon.ico")))
-pygame.display.set_caption(f"Super Mario Bros. for Python (FPS: {round(clock.get_fps())})" if get_nitpick("show_fps") else "Super Mario Bros. for Python")
+pygame.display.set_caption(f"{get_text_from_language("Super Mario Bros. Python")} {f"(FPS: {round(clock.get_fps())})" if get_nitpick("show_fps") else ""}")
 player_dist = 20
 intro_players = []
 low_gravity = False
@@ -2828,6 +2842,7 @@ clear_music = None
 background = None
 tileset = None
 hud = None
+previous_control_player = None
 control_changing_player = None
 control_changing_timer = 0
 fade_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -2843,12 +2858,14 @@ players_ready = 1
 players_controls = 1
 selected_course_pack = 1
 selected_texture = 1
+selected_language = get_folders("languages").index(language) + 1
 selected_menu_index = 0
 pause_menu_index = 0
 old_players_ready = 1
 old_players_controls = 1
 old_selected_course_pack = 0 if len(get_folders("courses")) == 0 else 1
 old_selected_texture = 0 if len(get_folders("textures")) == 0 else 1
+old_selected_language = get_folders("languages").index(language) + 1
 old_selected_menu_index = 0
 old_pause_menu_index = 0
 old_mus_vol = mus_vol
@@ -2890,7 +2907,7 @@ while running:
     sound_player.set_volume(snd_vol)
     SCREEN_WIDTH, SCREEN_HEIGHT = pygame.display.get_surface().get_size()
     centerx, centery = SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2
-    pygame.display.set_caption(f"Super Mario Bros. for Python (FPS: {round(clock.get_fps())})" if get_nitpick("show_fps") else "Super Mario Bros. for Python")
+    pygame.display.set_caption(f"{get_text_from_language("Super Mario Bros. Python")} {f"(FPS: {round(clock.get_fps())})" if get_nitpick("show_fps") else ""}")
     current_fps = FPS if clock.get_fps() == 0 else clock.get_fps()
     screen.fill((0, 0, 0))
     keys = pygame.key.get_pressed()
@@ -2903,8 +2920,9 @@ while running:
     players_controls = range_number(players_controls, 1, all_players)
     selected_course_pack = range_number(selected_course_pack, 0 if len(get_folders("courses")) == 0 else 1, len(get_folders("courses")))
     selected_texture = range_number(selected_texture, 0 if len(get_folders("textures")) == 0 else 1, len(get_folders("textures")))
+    selected_language = range_number(selected_language, 0 if len(get_folders("languages")) == 0 else 1, len(get_folders("languages")))
     FPS = range_number(FPS, 1, 120)
-    if ((menu or pause) and not old_players_ready == players_ready) or nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_players_controls == players_controls, old_selected_texture == selected_texture, old_selected_course_pack == selected_course_pack, OLD_FPS == FPS):
+    if ((menu or pause) and not old_players_ready == players_ready) or nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_players_controls == players_controls, old_selected_texture == selected_texture, old_selected_course_pack == selected_course_pack, old_selected_language == selected_language, OLD_FPS == FPS):
         sound_player.play_sound(beep_sound)
     old_mus_vol = mus_vol
     old_snd_vol = snd_vol
@@ -2912,6 +2930,7 @@ while running:
     old_players_controls = players_controls
     old_selected_course_pack = selected_course_pack
     old_selected_texture = selected_texture
+    old_selected_language = selected_language
     OLD_FPS = FPS
 
     with open(load_local_file("settings.json"), "w") as settings:
@@ -2923,8 +2942,10 @@ while running:
                 "fullscreen": fullscreen,
                 "fps": FPS,
                 "asset_directory": asset_directory,
-                "course_directory": course_directory
-            }, settings, indent=4)
+                "course_directory": course_directory,
+                "language": language
+            }, settings, indent=4
+        )
 
     if not old_asset_directory == asset_directory:
         old_asset_directory = asset_directory
@@ -2998,7 +3019,7 @@ while running:
                 try:
                     create_course(join("courses", course_directory, f"{world}-{course}" + ("" if subzone == 0 else f"_{subzone}")), True)
                 except:
-                    raise CustomError("MissingSubzoneError", f"Subzone {subzone} does not exist in {world}-{course}.")
+                    raise CustomError("MissingSubzoneError", f"{get_text_from_language("Subzone {subzone} does not exist in").replace("{subzone}", str(subzone))} {world}-{course}.")
                 camera.x = 0
                 camera.y = 0
                 if time <= 100 and not get_game_property("use_elapsed_time"):
@@ -3069,52 +3090,61 @@ while running:
                 font=load_intro_file("font.ttf"),
                 font_size=16,
                 outline=False,
-                scale=1 + (max(sin(min(intro_dt / 60, 3)) if konami_complete else 0, 0)) / 3
+                scale=1 + (max(sin(min(intro_dt / 60, 3)) if konami_complete else 0, 0)) / 3,
+                make_caps=False
             )
 
         if intro_dt >= (get_game_property("intro_time") * 60) and nor(fade_in, sound_player.is_playing(intro_sound), sound_player.is_playing(konami_sound)):
             fade_in = True
 
     elif menu:
-        player_control_text = len(text.wrap_text(f"controls ({get_key(characters_name, players_controls - 1)})", 16).splitlines()) / 8
+        game_text = text.wrap_text(get_text_from_language("{players} player game").replace("{players}", str(players_ready)), 32)
+        player_game_text = len(game_text.splitlines()) / 16
+        control_text = get_text_from_language("controls")
+        player_control_text = len(text.wrap_text(f"{control_text} ({get_key(characters_name, players_controls - 1)})", 32).splitlines()) / 16
+
+        languages_list = get_folders("languages")
+        language = get_key(languages_list, selected_language - 1)
+
         title_screen = [
             [
-                [f"{players_ready} player game", 0.75],
-                ["options", 0.875],
-                ["restart game", 1],
-                ["quit", 1.125]
+                [game_text, 0.75],
+                [get_text_from_language("options"), 0.75 + player_game_text],
+                [get_text_from_language("reboot game"), 0.8125 + player_game_text],
+                [get_text_from_language("quit"), 0.875 + player_game_text]
             ],
             [
-                [text.wrap_text(f"controls ({get_key(characters_name, players_controls - 1)})", 16), 0.75, (( (255, 255, 255), ) * 9) + (tuple(get_key(characters_color, players_controls - 1)), ) * (len(get_key(characters_name, players_controls - 1)) + 2)],
-                [f"music volume: {int(mus_vol * 100)}%", 0.75 + player_control_text],
-                [f"sound volume: {int(snd_vol * 100)}%", 0.875 + player_control_text],
-                ["set course pack", 1 + player_control_text],
-                ["load texture", 1.125 + player_control_text],
-                [f"set fps: {FPS}", 1.25 + player_control_text],
-                ["back", 1.375 + player_control_text]
+                [text.wrap_text(f"{control_text} ({get_key(characters_name, players_controls - 1)})", 32), 0.75, (( (255, 255, 255), ) * len(control_text)) + (tuple(get_key(characters_color, players_controls - 1)), ) * (len(get_key(characters_name, players_controls - 1)) + 3)],
+                [f"{get_text_from_language("music volume:")} {int(mus_vol * 100)}%", 0.75 + player_control_text],
+                [f"{get_text_from_language("sound volume:")} {int(snd_vol * 100)}%", 0.8125 + player_control_text],
+                [get_text_from_language("set course pack"), 0.875 + player_control_text],
+                [get_text_from_language("load texture"), 0.9375 + player_control_text],
+                [f"{get_text_from_language("set fps:")} {FPS}", 1 + player_control_text],
+                [text.wrap_text(f"{get_text_from_language("set language:")} {get_key(splitext(language), 0)}", 32), 1.0625 + player_control_text],
+                [get_text_from_language("back"), 1.0625 + player_control_text + (len(text.wrap_text(f"{get_text_from_language("set language:")} {get_key(splitext(language), 0)}", 32).splitlines()) / 16)]
             ]
         ]
 
         textures_list = get_folders("textures")
-        textures = [["base texture", 0.75]]
+        textures = [[get_text_from_language("base texture"), 0.75]]
         if not len(textures_list) == 0:
-            textures.append([f"{text.wrap_text(get_key(textures_list, selected_texture - 1), 16)}", 0.875])
-        textures.append(["back", 0.875 + (len(text.wrap_text(get_key(textures_list, selected_texture - 1), 16).splitlines()) / 8 if textures_list else 0)])
+            textures.append([f"{text.wrap_text(get_key(textures_list, selected_texture - 1), 16)}", 0.8125])
+        textures.append([get_text_from_language("back"), 0.8125 + (len(text.wrap_text(get_key(textures_list, selected_texture - 1), 16).splitlines()) / 8 if textures_list else 0)])
         title_screen.append(textures)
 
         courses_list = get_folders("courses")
         courses = []
         if not len(courses_list) == 0:
             courses.append([f"{get_key(courses_list, selected_course_pack - 1)}", 0.75])
-        courses.append(["back", 0.75 if len(courses_list) == 0 else 0.875])
+        courses.append([get_text_from_language("back"), 0.75 if len(courses_list) == 0 else 0.8125])
         title_screen.append(courses)
 
         for i in range(all_players):
             try:
                 title_screen.append(
                     [
-                        *[[f"{bind}: {pygame.key.name(get_key(controls_table, i, bind))}", 0.875 + (j / 8)] for j, bind in enumerate(bind_table)],
-                        ["back", 0.875 + (len(bind_table) / 8)]
+                        *[[f"{bind}: {pygame.key.name(get_key(controls_table, i, bind))}", 0.8125 + (j / 16)] for j, bind in enumerate(bind_table)],
+                        [get_text_from_language("back"), 0.8125 + (len(bind_table) / 16)]
                     ]
                 )
             except:
@@ -3140,16 +3170,17 @@ while running:
                 options = get_key(menu_options, i)
 
                 text.create_text(
-                    text=get_key(options, 0).upper(),
+                    text=get_key(options, 0),
                     position=(centerx - (centerx / 2) * (1 - cos(min(text_shift_dt, FADE_DURATION) / FADE_DURATION * pi)) / 2, centery * get_key(options, 1)),
                     alignment="center",
                     stickxtocamera=True,
-                    color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
+                    color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128),
+                    scale=0.5
                 )
 
                 if selected_menu_index == 0:
                     text.create_text(
-                        text="PRESS LEFT OR RIGHT\nTO SWITCH BETWEEN PLAYERS",
+                        text=get_text_from_language("press left or right\nto switch between players"),
                         position=(centerx - (centerx / 2) * (1 - cos(min(text_shift_dt, FADE_DURATION) / FADE_DURATION * pi)) / 2, centery / 16 + 4),
                         alignment="center",
                         stickxtocamera=True,
@@ -3161,16 +3192,17 @@ while running:
                 options = get_key(menu_options, i)
 
                 text.create_text(
-                    text=get_key(options, 0).upper(),
+                    text=get_key(options, 0),
                     position=(centerx / 2, centery * get_key(options, 1)),
                     alignment="center",
                     stickxtocamera=True,
-                    color=(get_key(options, 2) if selected_menu_index == i else tuple(tuple(x / 2 for x in inner) for inner in get_key(options, 2)) if is_tuple_of_tuples(get_key(options, 2)) else tuple(x / 2 for x in get_key(options, 2))) if len(options) == 3 else ((255, 255, 255) if selected_menu_index == i else (128, 128, 128))
+                    color=(get_key(options, 2) if selected_menu_index == i else tuple(tuple(x / 2 for x in inner) for inner in get_key(options, 2)) if is_tuple_of_tuples(get_key(options, 2)) else tuple(x / 2 for x in get_key(options, 2))) if len(options) == 3 else ((255, 255, 255) if selected_menu_index == i else (128, 128, 128)),
+                    scale=0.5
                 )
 
                 if selected_menu_index == 0:
                     text.create_text(
-                        text="PRESS LEFT OR RIGHT\nTO SWITCH BETWEEN PLAYERS",
+                        text=get_text_from_language("press left or right\nto switch between players"),
                         position=(centerx / 2, centery / 16 + 4),
                         alignment="center",
                         stickxtocamera=True,
@@ -3182,16 +3214,17 @@ while running:
                 texture_data = get_key(textures, i)
                 
                 text.create_text(
-                    text=get_key(texture_data, 0).upper(),
+                    text=get_key(texture_data, 0),
                     position=(centerx / 2, centery * get_key(texture_data, 1)),
                     alignment="center",
                     stickxtocamera=True,
-                    color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
+                    color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128),
+                    scale=0.5
                 )
 
                 if selected_menu_index == 1 and len(textures_list) >= 1:
                     text.create_text(
-                        text="PRESS LEFT OR RIGHT\nTO SWITCH BETWEEN TEXTURES",
+                        text=get_text_from_language("press left or right\nto switch between textures"),
                         position=(centerx / 2, centery * (1 + (len(text.wrap_text(get_key(textures_list, selected_texture - 1), 16).splitlines()) / 8))),
                         alignment="center",
                         stickxtocamera=True,
@@ -3200,8 +3233,8 @@ while running:
 
                 elif len(textures_list) == 0:
                     text.create_text(
-                        text="NO TEXTURES FOUND, PLEASE COPY THE ASSETS FOLDER TO THE TEXTURES FOLDER",
-                        position=(centerx / 2, centery * 1.25),
+                        text=text.wrap_text(get_text_from_language("no textures found, please copy the assets folder to the textures folder"), 16),
+                        position=(centerx / 2, centery * 1),
                         alignment="center",
                         stickxtocamera=True,
                         scale=0.5
@@ -3212,16 +3245,17 @@ while running:
                 course_data = get_key(courses, i)
                 
                 text.create_text(
-                    text=get_key(course_data, 0).upper(),
+                    text=get_key(course_data, 0),
                     position=(centerx / 2, centery * get_key(course_data, 1)),
                     alignment="center",
                     stickxtocamera=True,
-                    color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
+                    color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128),
+                    scale=0.5
                 )
 
                 if selected_menu_index == 0 and len(courses_list) >= 1:
                     text.create_text(
-                        text="PRESS LEFT OR RIGHT\nTO SWITCH BETWEEN COURSE PACKS",
+                        text=get_text_from_language("no textures found, please copy the assets folder to the textures folder"),
                         position=(centerx / 2, centery * 1.125),
                         alignment="center",
                         stickxtocamera=True,
@@ -3230,7 +3264,7 @@ while running:
 
                 elif len(courses_list) == 0:
                     text.create_text(
-                        text="NO COURSE PACKS FOUND, REDOWNLOADED THE SOURCE COURSES FOLDER",
+                        text=get_text_from_language("no course packs found, redownload the courses folder from the source"),
                         position=(centerx / 2, centery * 1.25),
                         alignment="center",
                         stickxtocamera=True,
@@ -3242,35 +3276,36 @@ while running:
                 options = get_key(menu_options, i)
 
                 text.create_text(
-                    text=text.wrap_text(f"{get_key(characters_name, menu_area - 5).upper()} CONTROLS", 16),
+                    text=text.wrap_text(f"{get_key(characters_name, menu_area - 5)} {get_text_from_language("controls")}", 16),
                     position=(centerx / 2, centery * 0.75),
                     alignment="center",
                     stickxtocamera=True,
-                    color=([tuple(get_key(characters_color, menu_area - 5))] * len(get_key(characters_name, menu_area - 5)) + [(255, 255, 255)] * 9)
+                    color=([tuple(get_key(characters_color, menu_area - 5))] * len(get_key(characters_name, menu_area - 5)) + [(255, 255, 255)] * 9),
+                    scale=0.5
                 )
 
                 text.create_text(
-                    text=get_key(options, 0).upper(),
-                    position=(centerx / 2, centery * (get_key(options, 1) + ((len(text.wrap_text(f"{get_key(characters_name, menu_area - 5).upper()} CONTROLS", 16).splitlines()) - 1) / 8))),
+                    text=get_key(options, 0),
+                    position=(centerx / 2, centery * (get_key(options, 1) + ((len(text.wrap_text(f"{get_key(characters_name, menu_area - 5)} {get_text_from_language("controls")}", 16).splitlines()) - 1) / 8))),
                     alignment="center",
                     stickxtocamera=True,
-                    color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
+                    color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128),
+                    scale=0.5
                 )
                 
                 if binding_key and selected_menu_index == i:
                     text.create_text(
-                        text="PRESS ESC TO\nCANCEL BINDING",
+                        text=text.wrap_text(get_text_from_language("press esc to cancel binding"), 16),
                         position=(centerx / 2, centery / 16),
                         alignment="center",
                         stickxtocamera=True,
-                        color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128)
+                        color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128),
+                        scale=0.5
                     )
 
         if game_ready or exit_ready:
             logo.draw()
             logo.update()
-
-        control_changing_timer = range_number(control_changing_timer + (1 if key_exists(title_screen[4:], menu_options) else -1), 0, 60)
         
         if dt / 60 >= logo.bounce_time:
             if title:
@@ -3289,11 +3324,7 @@ while running:
                     player.speedy = 0
                     player.fall_timer = 0
                     player.update()
-                    player.draw(
-                        (1 + (1 - cos(pi * (control_changing_timer / 60))) / 2) if control_changing_player == player else 1,
-                        ((1 - cos(pi * (control_changing_timer / 60))) / 2) * ((centerx * 0.75) - (control_changing_player.rect.x - camera.x + (control_changing_player.rect.width / 2))) if control_changing_player == player else 0,
-                        ((1 - cos(pi * (control_changing_timer / 60))) / 2) * ((centery / 2) - (control_changing_player.rect.y - camera.y + control_changing_player.rect.height - (control_changing_player.quad_height / 2) + 1)) if control_changing_player == player else 0
-                    )
+                    player.draw(1 + (1 - cos(pi * player.control_changing_timer / 60)) / 2, (1 - cos(pi * player.control_changing_timer / 60)) / 2 * ((centerx * 0.75) - (player.rect.x - camera.x + (player.rect.width / 2))), (1 - cos(pi * player.control_changing_timer / 60)) / 2 * ((centery / 2) - (player.rect.y - camera.y + player.rect.height - (player.quad_height / 2) + 1)))
 
     elif game:
         if not everyone_dead:
@@ -3417,15 +3448,16 @@ while running:
         if course_time <= 0 and not get_game_property("use_elapsed_time"):
             if everyone_dead:
                 text.create_text(
-                text="TIME'S UP!",
-                position=(centerx, centery),
-                alignment="center",
-                stickxtocamera=True,
-                stickytocamera=True
-            )
+                    text=get_text_from_language("time's up!"),
+                    position=(centerx, centery),
+                    alignment="center",
+                    stickxtocamera=True,
+                    stickytocamera=True
+                )
             else:
-                player.dead = True
-                player.dead_speed = -5
+                for player in players:
+                    player.dead = True
+                    player.dead_speed = -5
 
         everyone_dead = all(player.dead for player in players)
         if everyone_dead:
@@ -3434,11 +3466,13 @@ while running:
         if nor(bgm_player.is_playing("hurry"), everyone_dead, pipe_ready, pause):
             if all(player.star_timer < 1 for player in players) and any(player.star_music for player in players):
                 bgm_player.play_music(main_music)
-                player.star_music = False
+                for player in players:
+                    player.star_music = False
 
             if any(player.star_timer >= 1 for player in players) and not any(player.star_music for player in players):
                 bgm_player.play_music(star_music)
-                player.star_music = True
+                for player in players:
+                    player.star_music = True
 
         if course_time <= 100 and nor(fast_music, get_game_property("use_elapsed_time")):
             if not main_music.endswith("fast"):
@@ -3538,13 +3572,13 @@ while running:
         (sound_player.loop_sound if any(player.skidding for player in players) and nor(everyone_dead, any(player.piping for player in players)) else sound_player.stop_sound)(skid_sound)
 
         pause_menu_options = [
-            ["resume", 0.625],
-            [f"restart as {players_ready} player game", 0.75],
-            ["restart game", 0.875],
-            [f"music volume: {int(mus_vol * 100)}%", 1],
-            [f"sound volume: {int(snd_vol * 100)}%", 1.125],
-            [f"fps: {int(FPS)}", 1.25],
-            ["quit", 1.375]
+            [get_text_from_language("resume"), 0.625],
+            [get_text_from_language("restart as {players} player game").replace("{players}", str(players_ready)), 0.75],
+            [get_text_from_language("reboot game"), 0.875],
+            [f"{get_text_from_language("music volume:")} {int(mus_vol * 100)}%", 1],
+            [f"{get_text_from_language("sound volume:")} {int(snd_vol * 100)}%", 1.125],
+            [f"{get_text_from_language("set fps:")} {int(FPS)}", 1.25],
+            [get_text_from_language("quit"), 1.375]
         ]
 
         pause_menu_index = range_number(pause_menu_index, 0, len(pause_menu_options) - 1)
@@ -3557,7 +3591,7 @@ while running:
                 options = get_key(pause_menu_options, i)
 
                 text.create_text(
-                    text=get_key(options, 0).upper(),
+                    text=get_key(options, 0),
                     position=(centerx, centery * get_key(options, 1)),
                     alignment="center",
                     stickxtocamera=True,
@@ -3574,13 +3608,13 @@ while running:
     elif game_over:
         dt += 1
         text.create_text(
-            text="GAME OVER",
+            text=get_text_from_language("game over"),
             position=(centerx, centery),
             alignment="center"
         )
         if dt >= get_game_property("gameover_time") * 60:
             text.create_text(
-                text="PRESS ENTER TO RESTART",
+                text=get_text_from_language("press enter to restart"),
                 position=(centerx, SCREEN_HEIGHT // 1.75),
                 alignment="center",
                 scale=0.5
@@ -3589,7 +3623,7 @@ while running:
     if get_nitpick("show_battery"):
         battery = psutil.sensors_battery().percent
         text.create_text(
-            text=f"BATTERY: {battery}%",
+            text=f"{get_text_from_language("battery:")} {battery}%",
             position=(632, 384 - (text.font_size / 2 if get_nitpick("show_time") else 0)),
             alignment="right", stickxtocamera=True, stickytocamera=True, scale=0.5,
             color=tuple(range_number(c, 0, 255) for c in ((255, 0, 0) if battery < 0 else ((255, min(255, int(255 * (battery / 40))), 0) if battery < 50 else (max(0, int(255 * (1 - ((battery - 50) / 40)))), 255, 0) if battery < 100 else (0, 255, 0))))
@@ -3597,7 +3631,7 @@ while running:
 
     if get_nitpick("show_time"):
         text.create_text(
-            text=f"TIME: {system_time.now().strftime('%H:%M:%S')}",
+            text=f"{get_text_from_language("time:")} {system_time.now().strftime('%H:%M:%S')}",
             position=(632, 384), alignment="right", stickxtocamera=True, stickytocamera=True, scale=0.5
         )
 
@@ -3697,7 +3731,6 @@ while running:
                         if menu_options == get_key(title_screen, 0) and selected_menu_index == 0:
                             players_ready += change
                         elif menu_options == get_key(title_screen, 1):
-                            change = change
                             if selected_menu_index == 0:
                                 players_controls += change
                             elif selected_menu_index == 1:
@@ -3706,6 +3739,8 @@ while running:
                                 snd_vol += change / (4 if mod & pygame.KMOD_CTRL else 20)
                             elif selected_menu_index == 5:
                                 FPS += (change * (5 if mod & pygame.KMOD_CTRL else 1))
+                            elif selected_menu_index == 6:
+                                selected_language += change
                         elif menu_options == get_key(title_screen, 2) and selected_menu_index == 1 and len(textures) >= 1:
                             selected_texture += change
                         elif menu_options == get_key(title_screen, 3) and selected_menu_index == 1 and len(courses) >= 1:
@@ -3739,14 +3774,14 @@ while running:
                                 player_count = players_ready
                                 player_lives, player_sizes = [lives] * player_count, [0] * player_count
                         elif menu_options == get_key(title_screen, 1):
-                            if key_exists((0, 3, 4, 6), selected_menu_index):
+                            if key_exists((0, 3, 4, 7), selected_menu_index):
                                 if selected_menu_index == 0:
                                     menu_area = players_controls + 4
                                 elif selected_menu_index == 3:
                                     menu_area = 4
                                 elif selected_menu_index == 4:
                                     menu_area = 3
-                                elif selected_menu_index == 6:
+                                elif selected_menu_index == 7:
                                     menu_area = 1
                                 selected_menu_index = old_selected_menu_index = 0
                                 players_controls = old_players_controls = 1
@@ -3820,11 +3855,12 @@ with open(load_local_file("settings.json"), "w") as settings:
         {
             "mus_vol": mus_vol,
             "snd_vol": snd_vol,
-            **{f"controls{'' if i == 0 else i+1}": get_key(controls_table, i) for i in count_list_items(controls_table)},
-            "fps": FPS,
+            **{f"controls{'' if i == 0 else i+1}": get_key(controls_table, i) for i in range(all_players)},
             "fullscreen": fullscreen,
+            "fps": FPS,
             "asset_directory": asset_directory,
-            "course_directory": course_directory
+            "course_directory": course_directory,
+            "language": language
         }, settings, indent=4
     )
 
