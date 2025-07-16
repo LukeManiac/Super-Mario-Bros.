@@ -23,9 +23,31 @@ pi = 3.141592653589793
 main_directory = dirname(sys.executable if is_executable else abspath(__file__))
 
 def get_text_from_language(text):
-    language_text = load_json(join("languages", get_key(splitext(language), 0)), text)
+    language_path = join("languages", get_key(splitext(language), 0))
+    language_list = load_json(language_path)
+    language_text = get_key(language_list, text)
     if language_text is None:
-        raise CustomError("LanguageError", f"Missing {text} in {language}!")
+        messagebox.showinfo("Missing Text", f"'{text}' was missing in languages/{language} so it's been added for you.")
+        def set_json_key(data, key_path, value):
+                current = data
+                for _, key in enumerate(get_start(key_path, -1)):
+                    if isinstance(key, int):
+                        while len(current) <= key:
+                            current.append({})
+                    else:
+                        if not key_exists(current, key) or not isinstance(get_key(current, key), (dict, list)):
+                            set_key(current, key)({})
+                    current = get_key(current, key)
+                last_key = get_key(key_path, -1)
+                if isinstance(last_key, int):
+                    while len(current) <= last_key:
+                        current.append(None)
+                set_key(current, last_key)(value)
+
+        set_json_key(language_list, [text], text)
+        with open(f"{language_path}.json", "w") as new_language_list:
+            json.dump(language_list, new_language_list, indent=4)
+        return get_text_from_language(text)
     else:
         return str(language_text)
 
@@ -762,11 +784,44 @@ class Text:
     def __init__(self):
         self.font_size = get_game_property("font_size")
         self.font = pygame.font.Font(load_asset("font.ttf"), self.font_size)
+        self.glyph_cache = {}
+
+    def get_glyph(self, char, font, color, scale, outline):
+        key = (char, tuple(color), scale, outline)
+        if key_exists(self.glyph_cache, key):
+            return get_key(self.glyph_cache, key)
+
+        glyph_surface = font.render(char, True, color)
+
+        if not scale == 1.0:
+            glyph_surface = pygame.transform.scale(glyph_surface, (int(glyph_surface.get_width() * scale), int(glyph_surface.get_height() * scale)))
+
+        if outline:
+            outline_thickness = int(scale * 2)
+            outline_surface = pygame.Surface((glyph_surface.get_width() + outline_thickness * 2, glyph_surface.get_height() + outline_thickness * 2), pygame.SRCALPHA)
+
+            temp_surface = font.render(char, True, (0, 0, 0))
+            if not scale == 1.0:
+                temp_surface = pygame.transform.scale(temp_surface, (glyph_surface.get_width(), glyph_surface.get_height()))
+
+            for dx in [-outline_thickness, 0, outline_thickness]:
+                for dy in [-outline_thickness, 0, outline_thickness]:
+                    if dx == 0 and dy == 0:
+                        continue
+                    outline_surface.blit(temp_surface, (dx + outline_thickness, dy + outline_thickness))
+
+            outline_surface.blit(glyph_surface, (outline_thickness, outline_thickness))
+            glyph_surface = outline_surface
+
+        set_key(self.glyph_cache, key)(glyph_surface)
+        return glyph_surface
 
     def create_text(self, text, position, color=(255, 255, 255), alignment="left", stickxtocamera=False, stickytocamera=False, scale=1, font=None, font_size=None, outline=True, make_caps=True):
+        outline_enabled = bool(outline) and get_game_property("font_outline")
         text = str(text)
         if make_caps:
             text = text.upper()
+
         font_size = self.font_size if font_size is None else font_size
         font = self.font if font is None else pygame.font.Font(font, font_size)
         x, y = position
@@ -781,49 +836,37 @@ class Text:
         global_char_index = 0
 
         for line in lines:
+            outline_thickness = int(scale * 2)
             if char_colors:
                 surfaces = []
                 line_width = 0
                 line_height = 0
 
-                for char in line:
-                    char_surface = font.render(char, True, tuple(get_key(char_colors, global_char_index)) if global_char_index < len(char_colors) else (255, 255, 255))
-                    if scale != 1.0:
-                        char_surface = pygame.transform.scale(char_surface, (int(char_surface.get_width() * scale), int(char_surface.get_height() * scale)))
-                    surfaces.append(char_surface)
-                    line_width += char_surface.get_width()
-                    line_height = max(line_height, char_surface.get_height())
+                for i, char in enumerate(line):
+                    char_color = tuple(get_key(char_colors, global_char_index)) if global_char_index < len(char_colors) else (255, 255, 255)
+                    glyph = self.get_glyph(char, font, char_color, scale, outline_enabled)
+                    surfaces.append(glyph)
+
+                    char_width = glyph.get_width()
+                    if outline_enabled and i < len(line) - 1:
+                        char_width -= outline_thickness * 2
+
+                    line_width += char_width
+                    line_height = max(line_height, glyph.get_height())
                     global_char_index += 1
 
                 text_surface = pygame.Surface((line_width, line_height), pygame.SRCALPHA)
                 offset = 0
-                for s in surfaces:
+                for i, s in enumerate(surfaces):
                     text_surface.blit(s, (offset, 0))
-                    offset += s.get_width()
+                    char_width = s.get_width()
+                    if outline_enabled and i < len(surfaces) - 1:
+                        char_width -= outline_thickness * 2
+                    offset += char_width
 
             else:
-                text_surface = font.render(line, True, color)
-                if scale != 1.0:
-                    text_surface = pygame.transform.scale(text_surface, (int(text_surface.get_width() * scale), int(text_surface.get_height() * scale)))
-
+                text_surface = self.get_glyph(line, font, color, scale, outline_enabled)
                 line_width, line_height = text_surface.get_size()
-
-            if get_game_property("font_outline") and outline:
-                outline_size = scale * 2
-                outline_surface = pygame.Surface((int(text_surface.get_width() + outline_size * 2), int(text_surface.get_height() + outline_size * 2)), pygame.SRCALPHA)
-
-                temp_surface = font.render(line, True, (0, 0, 0))
-                if scale != 1.0:
-                    temp_surface = pygame.transform.scale(temp_surface, (int(text_surface.get_width()), int(text_surface.get_height())))
-
-                for dx in [-outline_size, 0, outline_size]:
-                    for dy in [-outline_size, 0, outline_size]:
-                        if dx == 0 and dy == 0:
-                            continue
-                        outline_surface.blit(temp_surface, (dx + outline_size, dy + outline_size))
-
-                outline_surface.blit(text_surface, (outline_size, outline_size))
-                text_surface = outline_surface
 
             rendered_lines.append((text_surface, text_surface.get_width(), text_surface.get_height()))
 
@@ -2922,8 +2965,10 @@ while running:
     selected_texture = range_number(selected_texture, 0 if len(get_folders("textures")) == 0 else 1, len(get_folders("textures")))
     selected_language = range_number(selected_language, 0 if len(get_folders("languages")) == 0 else 1, len(get_folders("languages")))
     FPS = range_number(FPS, 1, 120)
-    if ((menu or pause) and not old_players_ready == players_ready) or nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_players_controls == players_controls, old_selected_texture == selected_texture, old_selected_course_pack == selected_course_pack, old_selected_language == selected_language, OLD_FPS == FPS):
+    if ((menu or pause) and not old_players_ready == players_ready) or nand(old_players_controls == players_controls, old_selected_texture == selected_texture, old_selected_course_pack == selected_course_pack, OLD_FPS == FPS):
         sound_player.play_sound(beep_sound)
+    if nand(old_mus_vol == mus_vol, old_snd_vol == snd_vol, old_selected_language == selected_language):
+        sound_player.play_sound(coin_sound)
     old_mus_vol = mus_vol
     old_snd_vol = snd_vol
     old_players_ready = players_ready
@@ -3128,23 +3173,23 @@ while running:
         textures_list = get_folders("textures")
         textures = [[get_text_from_language("base texture"), 0.75]]
         if not len(textures_list) == 0:
-            textures.append([f"{text.wrap_text(get_key(textures_list, selected_texture - 1), 16)}", 0.8125])
-        textures.append([get_text_from_language("back"), 0.8125 + (len(text.wrap_text(get_key(textures_list, selected_texture - 1), 16).splitlines()) / 8 if textures_list else 0)])
+            textures.append([f"{text.wrap_text(get_key(textures_list, selected_texture - 1), 32)}", 0.8125])
+        textures.append([get_text_from_language("back"), 0.8125 + (len(text.wrap_text(get_key(textures_list, selected_texture - 1), 32).splitlines()) / 16 if textures_list else 0)])
         title_screen.append(textures)
 
         courses_list = get_folders("courses")
         courses = []
         if not len(courses_list) == 0:
-            courses.append([f"{get_key(courses_list, selected_course_pack - 1)}", 0.75])
-        courses.append([get_text_from_language("back"), 0.75 if len(courses_list) == 0 else 0.8125])
+            courses.append([f"{text.wrap_text(get_key(courses_list, selected_course_pack - 1), 32)}", 0.75])
+        courses.append([get_text_from_language("back"), 0.75 + (len(text.wrap_text(get_key(courses_list, selected_course_pack - 1), 32).splitlines()) / 16 if courses_list else 0)])
         title_screen.append(courses)
 
         for i in range(all_players):
             try:
                 title_screen.append(
                     [
-                        *[[f"{bind}: {pygame.key.name(get_key(controls_table, i, bind))}", 0.8125 + (j / 16)] for j, bind in enumerate(bind_table)],
-                        [get_text_from_language("back"), 0.8125 + (len(bind_table) / 16)]
+                        *[[f"{bind}: {pygame.key.name(get_key(controls_table, i, bind))}", 0.75 + (j / 16)] for j, bind in enumerate(bind_table)],
+                        [get_text_from_language("back"), 0.75 + (len(bind_table) / 16)]
                     ]
                 )
             except:
@@ -3225,7 +3270,7 @@ while running:
                 if selected_menu_index == 1 and len(textures_list) >= 1:
                     text.create_text(
                         text=get_text_from_language("press left or right\nto switch between textures"),
-                        position=(centerx / 2, centery * (1 + (len(text.wrap_text(get_key(textures_list, selected_texture - 1), 16).splitlines()) / 8))),
+                        position=(centerx / 2, centery * (1 + (len(text.wrap_text(get_key(textures_list, selected_texture - 1), 32).splitlines()) / 16))),
                         alignment="center",
                         stickxtocamera=True,
                         scale=0.5
@@ -3253,18 +3298,9 @@ while running:
                     scale=0.5
                 )
 
-                if selected_menu_index == 0 and len(courses_list) >= 1:
+                if len(courses_list) == 0:
                     text.create_text(
-                        text=get_text_from_language("no textures found, please copy the assets folder to the textures folder"),
-                        position=(centerx / 2, centery * 1.125),
-                        alignment="center",
-                        stickxtocamera=True,
-                        scale=0.5
-                    )
-
-                elif len(courses_list) == 0:
-                    text.create_text(
-                        text=get_text_from_language("no course packs found, redownload the courses folder from the source"),
+                        text=text.wrap_text(get_text_from_language("no course packs found, redownload the courses folder from the source"), 16),
                         position=(centerx / 2, centery * 1.25),
                         alignment="center",
                         stickxtocamera=True,
@@ -3276,17 +3312,17 @@ while running:
                 options = get_key(menu_options, i)
 
                 text.create_text(
-                    text=text.wrap_text(f"{get_key(characters_name, menu_area - 5)} {get_text_from_language("controls")}", 16),
+                    text=text.wrap_text(f"{get_key(characters_name, menu_area - 5)} {get_text_from_language("controls")}", 32),
                     position=(centerx / 2, centery * 0.75),
                     alignment="center",
                     stickxtocamera=True,
-                    color=([tuple(get_key(characters_color, menu_area - 5))] * len(get_key(characters_name, menu_area - 5)) + [(255, 255, 255)] * 9),
+                    color=([tuple(get_key(characters_color, menu_area - 5))] * len(get_key(characters_name, menu_area - 5)) + [(255, 255, 255)] * len(get_text_from_language("controls"))),
                     scale=0.5
                 )
 
                 text.create_text(
                     text=get_key(options, 0),
-                    position=(centerx / 2, centery * (get_key(options, 1) + ((len(text.wrap_text(f"{get_key(characters_name, menu_area - 5)} {get_text_from_language("controls")}", 16).splitlines()) - 1) / 8))),
+                    position=(centerx / 2, centery * (get_key(options, 1) + ((len(text.wrap_text(f"{get_key(characters_name, menu_area - 5)} {get_text_from_language("controls")}", 32).splitlines())) / 16))),
                     alignment="center",
                     stickxtocamera=True,
                     color=(255, 255, 255) if selected_menu_index == i else (128, 128, 128),
@@ -3574,7 +3610,7 @@ while running:
         pause_menu_options = [
             [get_text_from_language("resume"), 0.625],
             [get_text_from_language("restart as {players} player game").replace("{players}", str(players_ready)), 0.75],
-            [get_text_from_language("reboot game"), 0.875],
+            [get_text_from_language("reboot game"), 0.9375],
             [f"{get_text_from_language("music volume:")} {int(mus_vol * 100)}%", 1],
             [f"{get_text_from_language("sound volume:")} {int(snd_vol * 100)}%", 1.125],
             [f"{get_text_from_language("set fps:")} {int(FPS)}", 1.25],
