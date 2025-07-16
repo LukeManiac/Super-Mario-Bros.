@@ -1,177 +1,96 @@
-# Super Mario Bros. for Python
+# 🍄 Super Mario Bros. Python by LukeManiac
 
-## 🌟 Overview
-
-Welcome to **Super Mario Bros. for Python** — a fully-fledged recreation of the legendary **Super Mario Bros.** game, built entirely in Python!
-
-This project, passionately developed by **LukeManiac** (yes, that's me!), is my personal take on bringing the timeless magic of one of the most beloved platformers into the world of programming. Powered by the **`pygame` library**, the game offers smooth gameplay, nostalgic visuals, and a faithful retro experience. 
-
-From **jumping over Goombas** to **smashing bricks for coins**, every core mechanic has been carefully implemented to provide a customizable and endlessly expandable experience. Whether you're here to **relive the classic Mario adventure**, **learn Python game development**, or **mod your own worlds**, you're in for a fun ride!
+Welcome to Super Mario Bros. Python – a lovingly crafted, ultra-customizable remake of the Mario experience made entirely in Python! Built with modding and flexibility in mind, this project includes a treasure trove of features and future plans that will keep you exploring, tweaking, and expanding your own Mario universe.
 
 ---
 
-## 🚀 Features
+## 🕹️ Features
 
-- 🎮 **Full Menu System** – Navigate through interactive menus to start games, tweak settings, or configure controls.
-- 🎛️ **Customizable Controls** – Remap the controls however you like—keyboard, gamepad, or both!
-- 🔊 **Sound & Music Options** – Adjust background music and sound effects to perfect your retro atmosphere.
-- 🖥️ **Full-Screen Mode** – Instantly switch between windowed and full-screen modes (Alt + Enter).
-- 👥 **Multiplayer Support** – Play with up to *infinite players* (yes, really—control schemes cycle after four players).
-- 🖌️ **Custom Textures & Animations** – Replace or modify characters, enemies, and backgrounds with your own pixel art.
-- 🗺️ **Custom Course Packs** – Design and load brand-new level packs for endless adventures!
-- 🔁 **Advanced Event System** – Smooth keyboard, gamepad, and menu handling, built from scratch.
-- ⚡ **Smooth Fade Effects** – Enjoy polished level transitions and scene changes with stylish fades.
-- 💾 **Automatic Settings Saving** – Your preferences are saved—no need to reconfigure every time.
-- 🛠️ **Modding Support** – Build your own power-ups, adjust physics, create levels, and much more!
+### 🎬 Epic Intro Screen with Secret Code
 
----
+An introductory screen sets the scene before the game begins – but enter the Konami Code before the screen fades and you'll start with permanent invincibility! A fun and rewarding nod for retro lovers and power users alike.
 
-## ⚡ Modded Experience Note
+### 🎮 Smooth Control Customization
 
-If you plan to **mod the game heavily** (adding new sprites, levels, mechanics, etc.), it's **highly recommended** to package your project into a standalone `.exe` file after making major changes.  
+Select a player and watch them gracefully scale and glide into the center-right of the screen. This intuitive system allows you to assign and test new controls on the fly with responsive feedback and sleek animations.
 
-This ensures that custom content loads correctly and prevents dependency issues that can occur when sharing or running the modded game.
+### 🔁 Dynamic Loop Point System
 
-### 🛠 Recommended Tool
+Background music can loop with custom timestamps, giving each course its own rhythm and ambiance. Seamless audio transitions enhance immersion and allow composers to fine-tune the audio experience.
 
-- [**auto-py-to-exe**](https://github.com/brentvollebregt/auto-py-to-exe) — A simple, graphical tool for converting your Python scripts into executable files.
+### 🖼️ Advanced Texture Manager
 
-## Installation
+Swap and personalize backgrounds, music, sound effects, sprite sheets, and even character properties. The texture manager gives you full creative control over your game’s visuals and audio styling.
 
-### 📌 System Requirements
+### 📦 Course Pack Integration
 
-Before installing, make sure your system meets the following requirements:
+Plug and play with custom course packs that bundle levels, assets, and logic together. Share your worlds with others or install packs made by the community to experience new challenges.
 
-- **Python 3.x** – The game is written in Python, so you'll need a recent version of Python installed.
-- **Pygame Library** – This game is powered by `pygame`, so you must install it before running the game.
+### 🌍 Multi-Language Support
 
-### 🔧 Installation Steps
+The engine comes with built-in language files and allows you to add custom ones. Strings are auto-added to your language file if missing, ensuring nothing breaks even during development.
 
-1. Download Python
-- If you don’t have Python installed, download the latest version from https://www.python.org/downloads/ and install it.
+### ⚡ Power Meter System
 
-2. Install Pygame
-- Open a terminal or command prompt and run: `pip install pygame`
-- This will install the pygame library, which is essential for running the game.
+A real-time power meter visual shows how close you are to achieving maximum speed. Customize the visuals in your own texture packs at any time for a uniquely themed HUD.
 
-3. Download the Game Files
-- Download the ZIP file from GitHub and extract it, place it in the game directory folder.
+### 🎥 Adjustable Camera Smoothness
 
-4. Run the Game
-- Navigate to the game folder and run:
-- python main.py
-- The game should now start, and you’ll be greeted with the Super Mario Bros. title screen!
+You can tweak the camera smoothing to match your playstyle. Whether you prefer fast-snapping action or a cinematic floaty scroll, you’re in control of how the screen follows you.
+
+### 💾 Real-Time Save Data System
+
+Every frame is auto-saved during gameplay, ensuring your progress is protected from crashes or power outages. It’s like having invisible checkpoints at every step!
+
+### 🌈 Custom Starman Effects
+
+Star power now triggers fully editable visual effects, with sprite color blending and star particle animations that can be modded per texture pack or game state.
+
+### 🧩 Modding Support
+
+You can submit your own full mods of this script to LukeManiac for review. If your mod needs improvement, you’ll get helpful suggestions. If it’s ready, it could become an official add-on!
 
 ---
 
-## Issues & Workarounds
+## 🧪 Planned Features
 
-### 🎮 Controller Support
+### 📦 Item Carrying System
 
-While `pygame` does support gamepads, **its controller support is not perfect**, and certain controllers may not work properly without additional software. If you experience issues with button mapping or unresponsive inputs, you may need a **third-party key remapping tool**.
+You'll soon be able to pick up and carry items just like in modern Mario games. Whether tossing shells or transporting power-ups, this mechanic opens the door for puzzle-based gameplay.
 
-#### 🛠 Recommended Solution:
+### 🌟 All Super Mario Maker 2 Items
 
-- **[AntiMicro](https://github.com/AntiMicro/antimicro/releases/download/2.24-final/antimicro-2.24-win64.msi)** – This tool allows you to remap gamepad inputs to keyboard keys, making it easy to play with any controller.
+From the Ice Flower to fan-favorite fangame inventions, this feature will introduce a wide collection of power-ups and items directly inspired by community creations and Nintendo classics.
 
----
+### 🏗️ Custom Course Builder
 
-## Controls
+Design your own levels using an in-game interface similar to Super Mario Maker! Place blocks, enemies, and terrain elements, then playtest instantly.
 
-*(Can be changed in settings. If there are more than 4 players, the control scheme loops.)*
+### ✨ Star Power Animation Customization
 
-### 🎮 Player 1
-
-- **Move Up:** ↑
-- **Move Down:** ↓
-- **Move Left:** ←
-- **Move Right:** →
-- **Run:** `Z`
-- **Jump:** `X`
-- **Pause:** `Enter`
-
-### 🎮 Player 2
-
-- **Move Up:** `W`
-- **Move Down:** `S`
-- **Move Left:** `A`
-- **Move Right:** `D`
-- **Run:** `C`
-- **Jump:** `V`
-- **Pause:** `P`
-
-### 🎮 Player 3
-
-- **Move Up:** `I`
-- **Move Down:** `J`
-- **Move Left:** `K`
-- **Move Right:** `L`
-- **Run:** `M`
-- **Jump:** `N`
-- **Pause:** `O`
-
-### 🎮 Player 4
-
-- **Move Up:** `Home`
-- **Move Down:** `End`
-- **Move Left:** `Delete`
-- **Move Right:** `Page Down`
-- **Run:** `Insert`
-- **Jump:** `Page Up`
-- **Pause:** `Pause Break`
+Change how the invincibility star animation looks! Edit rotation speed, brightness pulsing, particle effects, and more to create an unforgettable invincible experience.
 
 ---
 
-## 🎨 Modding: Create Your Own Content!
+## 🛠️ How to Turn Your Mod Into an Executable Using auto-py-to-exe
 
-Want to **expand the game**? You can **add new mechanics, power-ups, and custom course packs** to make the game even better!
+1. Install `auto-py-to-exe` via pip:
+   `pip install auto-py-to-exe`
+2. Launch the interface:
+   `auto-py-to-exe`
+3. In the GUI:
 
-### 🔧 How to Mod the Game:
+* Select `main.py` as your script.
+* Choose "Onefile" or "Directory" depending on preference.
+* Make sure to add your assets folder in the "Additional Files" tab.
+* Set the icon (e.g., `icon.ico`) if desired.
+* Click “Convert .py to .exe” and wait for it to finish.
 
-1. **Create New Power-Ups:**
-- Modify the power-up script to introduce **new abilities** like a **double jump, shield, or dash move**.
-
-2. **Change Mechanics & Physics:**
-- Adjust movement speed, jump height, or enemy behavior.
-
-3. **Make Custom Course Packs:**
-- Design **new levels** using a simple **text-based format** or JSON files.
-
-4. **Add New Characters & Enemies:**
-- Modify or add new sprites and animations.
-
-5. **Customize Sound & Music:**
-- Replace the default **music and sound effects** with your own!
-
-📌 **Everything is open-source, so feel free to experiment and improve the game!**
+4. Share your `.exe` with friends and let them play your mod!
 
 ---
 
-## License
+## 🎉 Why You Should Play
 
-This project is licensed under the **MIT License**, meaning you are free to **modify, distribute, and enhance** the game however you like.
+Super Mario Bros. Python is more than just a fan project – it’s a living platform for creativity, nostalgia, and modding. Whether you're a developer, designer, or die-hard Mario fan, this project offers something for everyone. Jump in, create your dream course, and show the Mushroom Kingdom your style!
 
----
-
-## Contributions
-
-**Want to contribute?** Great! Here's how:
-
-1. **Fork the repository** on GitHub.
-2. **Create a new branch** for your changes.
-3. **Make your modifications** (fix bugs, add features, improve performance, etc.).
-4. **Submit a pull request**, and I’ll review your contributions! *I hope...*
-
----
-
-## Contact
-
-Have any questions, suggestions, or feature requests? Feel free to:
-
-- **Submit an issue** on GitHub.
-- **Start a discussion** in the community forum.
-- **Reach out via social media** if applicable.
-
----
-
-🎉 **Enjoy the game, and happy coding!** 🎮🚀
